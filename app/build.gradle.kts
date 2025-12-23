@@ -76,29 +76,15 @@ android {
 }
 
 dependencies {
-    // Core Android
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
-    // RecyclerView（必须）
-    implementation("androidx.recyclerview:recyclerview:1.3.2")
-    
-    // Desugaring
-    coreLibraryDesugaring(libs.desugar.jdk.libs)
 
-    // Compose
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.ui)
     implementation(libs.androidx.ui.graphics)
     implementation(libs.androidx.ui.tooling.preview)
-    implementation(libs.androidx.navigation.compose)
-    implementation(libs.androidx.lifecycle.viewmodel.compose)
-
-    
-    // Coroutines
-    implementation(libs.kotlinx.coroutines.android)
-
-    
+    implementation(libs.androidx.material3)
     
     // Material3 核心库（Kotlin DSL 必须用双引号）
     implementation("com.google.android.material:material:1.11.0")
