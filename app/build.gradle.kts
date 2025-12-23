@@ -121,8 +121,8 @@ dependencies {
     implementation(libs.coil.compose)
     
     
-    // Material3 核心库
-    implementation 'com.google.android.material:material:1.11.0'
+    // Material3 核心库（Kotlin DSL 必须用双引号）
+    implementation("com.google.android.material:material:1.11.0")
 
 
     // Testing
