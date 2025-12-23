@@ -14,8 +14,9 @@ android {
         applicationId = "com.kgapp.nfcrw"
         minSdk = 26
         targetSdk = 36
-        versionCode = 2
-        versionName = "0.0.2"
+
+        versionName = v0.0.5
+        versionCode = 5
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
