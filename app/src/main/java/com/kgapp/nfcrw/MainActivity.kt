@@ -12,16 +12,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
-import androidx.compose.material3.Typography
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        @Composable
-        setContent {
-            // 根据系统深色模式动态切换颜色
+        setContent { // ← 删掉多余的 @Composable 注解
             val darkTheme = isSystemInDarkTheme()
             val colors = if (darkTheme) {
                 dynamicDarkColorScheme(LocalContext.current)
@@ -31,7 +26,7 @@ class MainActivity : ComponentActivity() {
 
             MaterialTheme(
                 colorScheme = colors,
-                typography = Typography
+                typography = MaterialTheme.typography // ← 直接用 MaterialTheme.typography，无需额外 import
             ) {
                 Scaffold(
                     topBar = {
