@@ -16,78 +16,90 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         setContent {
-            MaterialTheme {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
+    MaterialTheme {
+        Scaffold(
+            topBar = {
+                TopAppBar(
+                    title = {
+                        Text("NFC 读写工具")
+                    }
+                )
+            }
+        ) { innerPadding ->
+            Surface(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding), // 👈 关键：给状态栏 + 顶部栏让位
+                color = MaterialTheme.colorScheme.background
+            ) {
+                Column(
+                    modifier = Modifier
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
+
+                    // ===== 卡片 1 =====
+                    Card(
+                        shape = MaterialTheme.shapes.extraLarge,
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant
+                        )
                     ) {
-
-                        // ===== 卡片 1 =====
-                        Card(
-                            shape = MaterialTheme.shapes.extraLarge,
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceVariant
-                            )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(16.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                            Column(
+                                modifier = Modifier.weight(1f)
                             ) {
-                                Column(
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Text("无障碍服务", style = MaterialTheme.typography.titleMedium)
-                                    Text(
-                                        "未启用 · 点击前往设置",
-                                        style = MaterialTheme.typography.bodyMedium
-                                    )
-                                }
-                                Button(onClick = { }) {
-                                    Text("前往设置")
-                                }
-                            }
-                        }
-
-                        // ===== 卡片 2 =====
-                        var enabled by remember { mutableStateOf(true) }
-
-                        Card(
-                            shape = MaterialTheme.shapes.extraLarge,
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceVariant
-                            )
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(16.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Text("悬浮窗", style = MaterialTheme.typography.titleMedium)
-                                    Text(
-                                        if (enabled) "已启用" else "已关闭",
-                                        style = MaterialTheme.typography.bodyMedium
-                                    )
-                                }
-                                Switch(
-                                    checked = enabled,
-                                    onCheckedChange = { enabled = it }
+                                Text("无障碍服务", style = MaterialTheme.typography.titleMedium)
+                                Text(
+                                    "未启用 · 点击前往设置",
+                                    style = MaterialTheme.typography.bodyMedium
                                 )
                             }
+                            Button(onClick = { }) {
+                                Text("前往设置")
+                            }
+                        }
+                    }
+
+                    // ===== 卡片 2 =====
+                    var enabled by remember { mutableStateOf(true) }
+
+                    Card(
+                        shape = MaterialTheme.shapes.extraLarge,
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant
+                        )
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("悬浮窗", style = MaterialTheme.typography.titleMedium)
+                                Text(
+                                    if (enabled) "已启用" else "已关闭",
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
+                            Switch(
+                                checked = enabled,
+                                onCheckedChange = { enabled = it }
+                            )
                         }
                     }
                 }
             }
         }
+    }
+}
     }
 }
