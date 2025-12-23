@@ -82,14 +82,6 @@ dependencies {
     implementation(libs.androidx.activity.compose)
     // RecyclerView（必须）
     implementation("androidx.recyclerview:recyclerview:1.3.2")
-
-    // 可选：如果你想用 RecyclerView + 动画
-    implementation("androidx.recyclerview:recyclerview-selection:1.1.0")
-    
-    //toast库
-    implementation("com.github.Spikeysanju:MotionToast:1.4")
-    
-    
     
     // Desugaring
     coreLibraryDesugaring(libs.desugar.jdk.libs)
@@ -99,38 +91,16 @@ dependencies {
     implementation(libs.androidx.ui)
     implementation(libs.androidx.ui.graphics)
     implementation(libs.androidx.ui.tooling.preview)
-    implementation(libs.androidx.material3)
-    implementation("androidx.compose.material:material-icons-extended")
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
-    
-    // Network
-    implementation(libs.retrofit)
-    implementation(libs.retrofit.gson)
-    implementation(libs.okhttp)
-    implementation(libs.okhttp.logging)
-    implementation(libs.gson)
-    
-    // Data Storage
-    implementation(libs.androidx.datastore.preferences)
+
     
     // Coroutines
     implementation(libs.kotlinx.coroutines.android)
-    
-    // Image Loading
-    implementation(libs.coil.compose)
+
     
     
     // Material3 核心库（Kotlin DSL 必须用双引号）
     implementation("com.google.android.material:material:1.11.0")
 
-
-    // Testing
-    testImplementation(libs.junit)
-    androidTestImplementation(libs.androidx.junit)
-    androidTestImplementation(libs.androidx.espresso.core)
-    androidTestImplementation(platform(libs.androidx.compose.bom))
-    androidTestImplementation(libs.androidx.ui.test.junit4)
-    debugImplementation(libs.androidx.ui.tooling)
-    debugImplementation(libs.androidx.ui.test.manifest)
 }
