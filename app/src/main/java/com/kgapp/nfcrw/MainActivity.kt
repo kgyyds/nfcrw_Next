@@ -4,43 +4,52 @@ package com.kgapp.nfcrw
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         setContent {
-            MaterialTheme {
+            // 根据系统深色模式动态切换颜色
+            val darkTheme = isSystemInDarkTheme()
+            val colors = if (darkTheme) {
+                dynamicDarkColorScheme(LocalContext.current)
+            } else {
+                dynamicLightColorScheme(LocalContext.current)
+            }
 
+            MaterialTheme(
+                colorScheme = colors,
+                typography = Typography
+            ) {
                 Scaffold(
                     topBar = {
                         TopAppBar(
-                            title = {
-                                Text("NFC 读写工具")
-                            }
+                            title = { Text("NFC 读写工具") }
                         )
                     }
                 ) { innerPadding ->
-
                     Surface(
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(innerPadding),
                         color = MaterialTheme.colorScheme.background
                     ) {
-
                         Column(
                             modifier = Modifier
                                 .padding(16.dp),
                             verticalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-
                             // ===== 卡片 1 =====
                             Card(
                                 shape = MaterialTheme.shapes.extraLarge,
@@ -66,7 +75,7 @@ class MainActivity : ComponentActivity() {
                                             style = MaterialTheme.typography.bodyMedium
                                         )
                                     }
-                                    Button(onClick = { }) {
+                                    Button(onClick = { /* TODO: 跳转设置 */ }) {
                                         Text("前往设置")
                                     }
                                 }
