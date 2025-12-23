@@ -63,8 +63,7 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
-        // Enable Java 8+ API desugaring
-        isCoreLibraryDesugaringEnabled = true
+        
     }
     kotlinOptions {
         jvmTarget = "11"
