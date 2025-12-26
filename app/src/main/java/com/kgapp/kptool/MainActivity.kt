@@ -1,5 +1,5 @@
 @file:OptIn(ExperimentalMaterial3Api::class)
-package com.kgapp.nfcrw
+package com.kgapp.kptool
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
