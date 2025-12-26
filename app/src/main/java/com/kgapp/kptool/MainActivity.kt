@@ -1,4 +1,5 @@
 @file:OptIn(ExperimentalMaterial3Api::class)
+
 package com.kgapp.kptool
 
 import android.os.Bundle
@@ -10,110 +11,158 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity() {
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { // ← 删掉多余的 @Composable 注解
+
+        setContent {
+
+            val context = LocalContext.current
             val darkTheme = isSystemInDarkTheme()
-            val colors = if (darkTheme) {
-                dynamicDarkColorScheme(LocalContext.current)
+
+            val colorScheme = if (darkTheme) {
+                dynamicDarkColorScheme(context)
             } else {
-                dynamicLightColorScheme(LocalContext.current)
+                dynamicLightColorScheme(context)
             }
 
             MaterialTheme(
-                colorScheme = colors,
-                typography = MaterialTheme.typography // ← 直接用 MaterialTheme.typography，无需额外 import
+                colorScheme = colorScheme,
+                typography = MaterialTheme.typography
             ) {
                 Scaffold(
                     topBar = {
                         TopAppBar(
-                            title = { Text("NFC 读写工具") }
+                            title = { Text("KPTool") }
                         )
                     }
                 ) { innerPadding ->
-                    Surface(
+
+                    Column(
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(innerPadding),
-                        color = MaterialTheme.colorScheme.background
+                            .padding(innerPadding)
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
-                        Column(
-                            modifier = Modifier
-                                .padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            // ===== 卡片 1 =====
-                            Card(
-                                shape = MaterialTheme.shapes.extraLarge,
-                                colors = CardDefaults.cardColors(
-                                    containerColor = MaterialTheme.colorScheme.surfaceVariant
-                                )
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(16.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Column(
-                                        modifier = Modifier.weight(1f)
-                                    ) {
-                                        Text(
-                                            text = "无障碍服务",
-                                            style = MaterialTheme.typography.titleMedium
-                                        )
-                                        Text(
-                                            text = "未启用 · 点击前往设置",
-                                            style = MaterialTheme.typography.bodyMedium
-                                        )
-                                    }
-                                    Button(onClick = { /* TODO: 跳转设置 */ }) {
-                                        Text("前往设置")
-                                    }
-                                }
-                            }
 
-                            // ===== 卡片 2 =====
-                            var enabled by remember { mutableStateOf(true) }
+                        // ===== CPU 卡片 =====
+                        StatCard(
+                            title = "CPU",
+                            subtitle = "使用率",
+                            progress = 0.45f,
+                            valueText = "45%",
+                            extraInfo = "频率 1800 MHz · 温度 46℃"
+                        )
 
-                            Card(
-                                shape = MaterialTheme.shapes.extraLarge,
-                                colors = CardDefaults.cardColors(
-                                    containerColor = MaterialTheme.colorScheme.surfaceVariant
-                                )
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(16.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Column(
-                                        modifier = Modifier.weight(1f)
-                                    ) {
-                                        Text(
-                                            text = "悬浮窗",
-                                            style = MaterialTheme.typography.titleMedium
-                                        )
-                                        Text(
-                                            text = if (enabled) "已启用" else "已关闭",
-                                            style = MaterialTheme.typography.bodyMedium
-                                        )
-                                    }
-                                    Switch(
-                                        checked = enabled,
-                                        onCheckedChange = { enabled = it }
-                                    )
-                                }
-                            }
-                        }
+                        // ===== GPU 卡片 =====
+                        StatCard(
+                            title = "GPU",
+                            subtitle = "使用率",
+                            progress = 0.28f,
+                            valueText = "28%",
+                            extraInfo = "频率 650 MHz · 温度 44℃"
+                        )
+
+                        // ===== 内存 卡片 =====
+                        StatCard(
+                            title = "内存",
+                            subtitle = "已用",
+                            progress = 0.62f,
+                            valueText = "7.4 / 12 GB",
+                            extraInfo = "可用 4.6 GB · Swap 0 GB"
+                        )
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun StatCard(
+    title: String,
+    subtitle: String,
+    progress: Float,          // 0f..1f
+    valueText: String,
+    extraInfo: String
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.extraLarge,
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+
+            // 标题 + 数值
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                Text(
+                    text = valueText,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+
+            // 进度条
+            LinearProgressIndicator(
+                progress = { progress.coerceIn(0f, 1f) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(8.dp)
+            )
+
+            // 0% - 100%
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "0%",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = "100%",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            // 附加信息
+            Text(
+                text = extraInfo,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
