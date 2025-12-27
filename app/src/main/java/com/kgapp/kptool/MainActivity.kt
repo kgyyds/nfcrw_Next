@@ -94,6 +94,16 @@ class MainActivity : ComponentActivity() {
         setContent {
             HackerTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+
+                    www.sanju.motiontoast.MotionToast.darkToast(
+                        this,
+                        "Activity Init",
+                        "The MainActivity is successful run at funthin setContent",
+                        www.sanju.motiontoast.MotionToastStyle.WARNING,
+                        www.sanju.motiontoast.MotionToast.GRAVITY_TOP,
+                        www.sanju.motiontoast.MotionToast.LONG_DURATION,
+                        null   //不传字体也行
+                    )
                     MainScreen()
                 }
             }
@@ -174,6 +184,12 @@ fun MainScreen() {
                 context.startActivity(Intent(context, AboutActivity::class.java))
             }
         }
+        //test toast
+        item {
+            ToastTestCard()
+        }
+
+
 
         item { Spacer(Modifier.height(6.dp)) }
     }
@@ -361,4 +377,61 @@ private fun HackerTheme(content: @Composable () -> Unit) {
         typography = Typography(),
         content = content
     )
+}
+
+
+
+@Composable
+fun ToastTestCard() {
+    val context = LocalContext.current
+    val activity = context as ComponentActivity   // ⭐关键点
+
+    Card(
+        colors = CardDefaults.cardColors(containerColor = HackerPanel),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable {
+                // 🔥 MotionToast 在这里触发
+                www.sanju.motiontoast.MotionToast.darkToast(
+                    activity,
+                    "TEST",
+                    "MotionToast😈",
+                    www.sanju.motiontoast.MotionToastStyle.SUCCESS,
+                    www.sanju.motiontoast.MotionToast.GRAVITY_BOTTOM,
+                    www.sanju.motiontoast.MotionToast.LONG_DURATION,
+                    null   // 不传字体也行，先跑通
+                )
+            }
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Default.Warning,
+                contentDescription = "toast",
+                tint = HackerGreen,
+                modifier = Modifier.size(22.dp)
+            )
+
+            Spacer(Modifier.width(12.dp))
+
+            Column {
+                Text(
+                    text = "TEST//TOAST",
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = "点击弹出 MotionToast",
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
 }

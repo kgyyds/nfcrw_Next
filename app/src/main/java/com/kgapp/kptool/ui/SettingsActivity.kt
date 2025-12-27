@@ -174,11 +174,30 @@ fun SettingsScreen() {
                     onClick = {
                         val parsed = AppSettings.parseKeysFromText(keysText)
                         if (parsed.isEmpty()) {
-                            toast("至少要有 1 个合法 key 😅")
+                            val activity = context as ComponentActivity
+                            www.sanju.motiontoast.MotionToast.darkToast(
+                                activity,
+                                "至少需要1个合法key",
+                                "key数量太少",
+                                www.sanju.motiontoast.MotionToastStyle.SUCCESS,
+                                www.sanju.motiontoast.MotionToast.GRAVITY_BOTTOM,
+                                www.sanju.motiontoast.MotionToast.LONG_DURATION,
+                                null   //不传字体也行
+                            )
                             return@Button
                         }
                         AppSettings.setKeysText(context, keysText)
-                        toast("保存成功 ✅（$keyCount keys）")
+
+                        val activity = context as ComponentActivity
+                        www.sanju.motiontoast.MotionToast.darkToast(
+                            activity,
+                            "保存成功",
+                            "保存key数量 （$keyCount）",
+                            www.sanju.motiontoast.MotionToastStyle.SUCCESS,
+                            www.sanju.motiontoast.MotionToast.GRAVITY_BOTTOM,
+                            www.sanju.motiontoast.MotionToast.LONG_DURATION,
+                            null   //不传字体也行
+                        )
                     }
                 ) {
                     Text("SAVE", fontFamily = FontFamily.Monospace, fontWeight = FontWeight.SemiBold)
@@ -189,7 +208,16 @@ fun SettingsScreen() {
                     onClick = {
                         keysText = AppSettings.getKeysText(context)
                         refreshCount()
-                        toast("已加载已保存的 keys")
+                        val activity = context as ComponentActivity
+                        www.sanju.motiontoast.MotionToast.darkToast(
+                            activity,
+                            "加载成功",
+                            "加载了key",
+                            www.sanju.motiontoast.MotionToastStyle.SUCCESS,
+                            www.sanju.motiontoast.MotionToast.GRAVITY_BOTTOM,
+                            www.sanju.motiontoast.MotionToast.LONG_DURATION,
+                            null   //不传字体也行
+                        )
                     }
                 ) {
                     Text("RELOAD", fontFamily = FontFamily.Monospace, fontWeight = FontWeight.SemiBold)

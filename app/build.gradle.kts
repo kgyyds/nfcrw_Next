@@ -95,4 +95,7 @@ dependencies {
     // Material3 核心库（Kotlin DSL 必须用双引号）
     implementation("com.google.android.material:material:1.11.0")
 
+
+    //toast
+    implementation ("com.github.Spikeysanju:MotionToast:1.4")
 }

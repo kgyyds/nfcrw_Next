@@ -3,6 +3,7 @@ package com.kgapp.kptool.ui
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -113,6 +114,7 @@ private fun AboutScreen() {
                         fontFamily = FontFamily.Monospace,
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
+
                     )
                 }
             }
@@ -150,6 +152,7 @@ private fun AboutScreen() {
                 fontWeight = FontWeight.SemiBold,
                 fontSize = 14.sp,
                 color = HackerRed
+
             )
             Spacer(Modifier.height(8.dp))
             Text(
@@ -179,6 +182,13 @@ private fun AboutScreen() {
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+        }
+        Card {
+            Text(
+                text = "TODO",
+                fontSize = 14.sp
+            )
+
         }
 
         Spacer(Modifier.height(8.dp))

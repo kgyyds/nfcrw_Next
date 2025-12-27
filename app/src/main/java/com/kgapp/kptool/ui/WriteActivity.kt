@@ -693,11 +693,33 @@ fun WriteScreen(nfcAdapter: NfcAdapter?) {
                                 } else {
                                     armed = true
                                     status = "持续写入模式 ✅（贴卡就写，点“停止写入”结束）"
+                                    val activity = context as ComponentActivity
+                                    www.sanju.motiontoast.MotionToast.darkToast(
+                                        activity,
+                                        "持续写入启动",
+                                        "对识别的MCT标签进行写入",
+                                        www.sanju.motiontoast.MotionToastStyle.SUCCESS,
+                                        www.sanju.motiontoast.MotionToast.GRAVITY_BOTTOM,
+                                        www.sanju.motiontoast.MotionToast.LONG_DURATION,
+                                        null   //不传字体也行
+                                    )
+
+
                                     log(LogLevel.INFO, "ARMED => waiting tags…")
                                 }
                             } else {
                                 armed = false
                                 status = "已停止写入 ⛔"
+                                val activity = context as ComponentActivity
+                                www.sanju.motiontoast.MotionToast.darkToast(
+                                    activity,
+                                    "持续写入停止",
+                                    "停止对识别的MCT标签写入",
+                                    www.sanju.motiontoast.MotionToastStyle.INFO,
+                                    www.sanju.motiontoast.MotionToast.GRAVITY_BOTTOM,
+                                    www.sanju.motiontoast.MotionToast.LONG_DURATION,
+                                    null   //不传字体也行
+                                )
                                 log(LogLevel.INFO, "DISARMED => ignore tags")
                             }
                         },
