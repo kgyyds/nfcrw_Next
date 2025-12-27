@@ -1,4 +1,4 @@
 <resources>
-    <string name="app_name">NFC原始数据读写</string>
+    <string name="app_name">数据获取</string>
     <string name="accessibility_service_description">1</string>
 </resources>

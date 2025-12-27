@@ -30,11 +30,12 @@ import androidx.compose.ui.unit.dp
 import com.kgapp.kptool.toolact.KPToolStats
 import com.kgapp.kptool.toolact.rememberKPToolStats
 import kotlin.math.roundToInt
-
+//加上rt类，不然爆
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
+            //获取系统的那个状态，黑夜状态
             val ctx = LocalContext.current
             val dark = isSystemInDarkTheme()
 
@@ -277,9 +278,9 @@ private fun GpuExpanded(stats: KPToolStats) {
 private fun RamExpanded(stats: KPToolStats) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("Swap：${stats.ram.swapText}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        KV("已用", "%.2f GB".format(stats.ram.usedGB))
-        KV("缓存(估算)", "%.2f GB".format(stats.ram.cachedGB))
-        KV("真实空闲(估算)", "%.2f GB".format(stats.ram.freeRealGB))
-        KV("MemAvailable", "%.2f GB".format(stats.ram.realAvailGB))
+        KV("已用内存", "%.2f GB".format(stats.ram.usedGB))
+        KV("被系统缓存", "%.2f GB".format(stats.ram.cachedGB))
+        KV("真实空闲内存", "%.2f GB".format(stats.ram.freeRealGB))
+        KV("实际可用内存", "%.2f GB".format(stats.ram.realAvailGB))
     }
 }
