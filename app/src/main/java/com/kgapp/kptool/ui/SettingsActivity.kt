@@ -108,7 +108,7 @@ fun SettingsScreen() {
             Text(
                 text = "• 每行一个 key（12位 HEX，比如 FFFFFFFFFFFF）\n" +
                         "• 支持 # 注释\n" +
-                        "• 建议只放你确认有效的 KeyA/KeyB（别塞太多没用的，读写会更快）\n" +
+                        "• 建议只放你确认有效的 KeyA/KeyB（别塞太多没用的，这样读写会更快）\n" +
                         "• 当前可用 keys：$keyCount",
                 fontSize = 12.sp,
                 fontFamily = FontFamily.Monospace,

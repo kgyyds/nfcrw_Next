@@ -261,7 +261,7 @@ private fun NFCStatusCardHacker(modifier: Modifier = Modifier) {
     val (title, desc, icon, color) = when (nfcState) {
         NfcState.NOT_SUPPORTED -> Quad("NFC//UNSUPPORTED", "没有 NFC 硬件", Icons.Default.Block, HackerRed)
         NfcState.ENABLED -> Quad("NFC//ONLINE", "可以直接读写 ✅", Icons.Default.Nfc, HackerGreen)
-        NfcState.DISABLED -> Quad("NFC//OFFLINE", "点一下去系统设置开启", Icons.Default.Warning, HackerOrange)
+        NfcState.DISABLED -> Quad("NFC//OFFLINE", "等待授权", Icons.Default.Warning, HackerOrange)
     }
 
     Card(

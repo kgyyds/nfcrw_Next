@@ -109,7 +109,7 @@ fun ReadScreen(nfcAdapter: NfcAdapter?) {
     // UI
     var selectorExpanded by rememberSaveable { mutableStateOf(false) }
     var includeTrailer by rememberSaveable { mutableStateOf(false) }
-    var status by remember { mutableStateOf("先选择扇区，再贴卡 📶") }
+    var status by remember { mutableStateOf("等待读卡") }
 
     // 最终 dump
     var output by remember { mutableStateOf("") }
@@ -204,12 +204,12 @@ fun ReadScreen(nfcAdapter: NfcAdapter?) {
         scope.launch {
             val sectors = selectedSectors()
             if (keys.isEmpty()) {
-                status = "没有可用 keys ❌ 去设置页添加并保存"
+                status = "没有可用 keys 请先在设置添加"
                 log(LogType.ERROR, "NO KEYS => go Settings")
                 return@launch
             }
             if (sectors.isEmpty()) {
-                status = "你没勾选任何扇区 😼"
+                status = "未勾选任何扇区"
                 log(LogType.WARN, "NO SECTOR SELECTED")
                 return@launch
             }
@@ -292,7 +292,7 @@ fun ReadScreen(nfcAdapter: NfcAdapter?) {
     // ReaderMode（贴卡触发）
     DisposableEffect(nfcAdapter, activity) {
         if (nfcAdapter == null) {
-            status = "该设备不支持 NFC ❌"
+            status = "该设备不支持 NFC "
             log(LogType.ERROR, "NFC NOT SUPPORTED")
             onDispose { }
         } else {

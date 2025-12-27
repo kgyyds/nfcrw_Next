@@ -279,7 +279,7 @@ fun WriteScreen(nfcAdapter: NfcAdapter?) {
             log(LogLevel.INFO, "TAG DETECTED uid=$uid")
             val err = validateItems()
             if (err != null) {
-                status = "参数不合法 ❌（仍在持续等待）"
+                status = "参数不合法 （仍在持续等待）"
                 log(LogLevel.ERR, "Validate fail: $err")
                 return@launch
             }
@@ -665,9 +665,9 @@ fun WriteScreen(nfcAdapter: NfcAdapter?) {
                                         val hexNorm = normalizeHex(item.hexText)
                                         val ok = isHex32(hexNorm)
                                         val warn = when {
-                                            block == 0 -> "禁止写 Block 0"
-                                            (!allowTrailer && block % 4 == 3) -> "Trailer 禁止写（开关可开启）"
-                                            !ok && hexNorm.isNotBlank() -> "格式不对：必须 32 个 hex"
+                                            block == 0 -> "当前设置策略禁止写 Block 0"
+                                            (!allowTrailer && block % 4 == 3) -> "Trailer 禁止写 ，请允许写Trailer以继续"
+                                            !ok && hexNorm.isNotBlank() -> "格式错误：必须 32 个 hex"
                                             else -> null
                                         }
                                         if (warn != null) {
