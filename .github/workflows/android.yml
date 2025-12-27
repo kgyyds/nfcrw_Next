@@ -80,6 +80,6 @@ jobs:
             --endpoint=oss-cn-guangzhou.aliyuncs.com
 
           ossutil cp \
-            app/build/outputs/apk/debug/app-debug.apk \
+            app/build/outputs/apk/release/app-release.apk \
             oss://kgyydsgithub/ci-builds/app-debug.apk \
             -f
