@@ -12,13 +12,23 @@ pluginManagement {
     }
 }
 dependencyResolutionManagement {
-    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
+
     repositories {
+        // 阿里云镜像（优先）
+        maven("https://maven.aliyun.com/repository/public")
+        maven("https://maven.aliyun.com/repository/google")
+        maven("https://maven.aliyun.com/repository/central")
+
+        // 官方兜底
         google()
         mavenCentral()
-        maven { url = uri("https://jitpack.io") }  //jit仓库依赖
+
+        // JitPack（放最后，慢 & 不稳定）
+        maven("https://jitpack.io")
     }
 }
+
 
 rootProject.name = "nfcrw_next"
 include(":app")
