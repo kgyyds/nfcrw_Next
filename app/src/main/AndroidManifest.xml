@@ -1,6 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.kgapp.kptool">
+    <uses-permission android:name="android.permission.NFC" />
+
+    <uses-feature
+        android:name="android.hardware.nfc"
+        android:required="false" />
+
 
     <application
         android:allowBackup="true"
@@ -10,7 +16,7 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Material3.DayNight.NoActionBar">
 
-        <!-- 仅保留主活动配置 -->
+        <!-- 主活动配置 -->
         <activity
             android:name=".MainActivity"
             android:exported="true">
@@ -19,6 +25,29 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- 读取活动 -->
+        <activity
+            android:name=".ui.ReadActivity"
+            android:exported="false"
+            android:label="读取页面" />
+
+        <!-- 写入活动 -->
+        <activity
+            android:name=".ui.WriteActivity"
+            android:exported="false"
+            android:label="写入页面" />
+
+        <!-- 设置活动 -->
+        <activity
+            android:name=".ui.SettingsActivity"
+            android:exported="false"
+            android:label="设置页面" />
+        <!--关于作者 -->
+        <activity
+            android:name=".ui.AboutActivity"
+            android:exported="false"
+            android:label="关于页面"/>
 
     </application>
 

@@ -1,286 +1,364 @@
-@file:OptIn(ExperimentalMaterial3Api::class)
-
 package com.kgapp.kptool
 
-import android.os.Build
+import android.content.Context
+import android.content.Intent
+import android.nfc.NfcAdapter
 import android.os.Bundle
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.animation.animateContentSize
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.FileOpen
+import androidx.compose.material.icons.filled.Nfc
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.Typography
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.kgapp.kptool.toolact.KPToolStats
-import com.kgapp.kptool.toolact.rememberKPToolStats
-import kotlin.math.roundToInt
-//加上rt类，不然爆
+import androidx.compose.ui.unit.sp
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import com.kgapp.kptool.ui.AboutActivity
+import com.kgapp.kptool.ui.ReadActivity
+import com.kgapp.kptool.ui.SettingsActivity
+import com.kgapp.kptool.ui.WriteActivity
+
+private enum class NfcState { NOT_SUPPORTED, DISABLED, ENABLED }
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // ✅ UI 不和状态栏合并（保留系统状态栏区域）
+        WindowCompat.setDecorFitsSystemWindows(window, true)
+
+        /*
+        //hide 状态栏
+        ViewCompat.setOnApplyWindowInsetsListener(window.decorView) { v, insets ->
+            val controller = ViewCompat.getWindowInsetsController(v)
+            controller?.hide(WindowInsetsCompat.Type.statusBars())
+            insets
+        }
+        */
+
+        // ✅ 状态栏暗色 + 浅色图标
+        window.statusBarColor = android.graphics.Color.parseColor("#050607")
+        WindowInsetsControllerCompat(window, window.decorView).isAppearanceLightStatusBars = false
+
         setContent {
-            //获取系统的那个状态，黑夜状态
-            val ctx = LocalContext.current
-            val dark = isSystemInDarkTheme()
-
-            val colors = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                if (dark) dynamicDarkColorScheme(ctx) else dynamicLightColorScheme(ctx)
-            } else {
-                if (dark) darkColorScheme() else lightColorScheme()
-            }
-
-            val stats by rememberKPToolStats(refreshMs = 1000L, gpuHistorySize = 60)
-
-            MaterialTheme(colorScheme = colors) {
-                KPToolScreen(stats)
+            HackerTheme {
+                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                    MainScreen()
+                }
             }
         }
     }
 }
 
 @Composable
-private fun KPToolScreen(stats: KPToolStats) {
-    var cpuExpanded by rememberSaveable { mutableStateOf(false) }
-    var gpuExpanded by rememberSaveable { mutableStateOf(false) }
-    var ramExpanded by rememberSaveable { mutableStateOf(false) }
+fun MainScreen() {
+    val context = LocalContext.current
+    val listState = rememberLazyListState()
 
-    Scaffold(topBar = { TopAppBar(title = { Text("KPTool") }) }) { inner ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(inner)
-                .padding(16.dp)
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-
-            GaugeCard(
-                icon = Icons.Filled.Speed,
-                title = "CPU",
-                subtitle = "总使用率",
-                progress = stats.cpu.usage,
-                valueText = stats.cpu.usageText,
-                chips = listOf(
-                    "频率：${stats.cpu.freqMHz ?: "--"} MHz",
-                    "温度：${stats.cpu.tempText}"   // ✅ 永不空
-                ),
-                expanded = cpuExpanded,
-                onToggle = { cpuExpanded = !cpuExpanded }
-            ) { CpuExpanded(stats) }
-
-            GaugeCard(
-                icon = Icons.Filled.GraphicEq,
-                title = "GPU",
-                subtitle = "使用率/频率",
-                progress = stats.gpu.usage,
-                valueText = stats.gpu.usageText,
-                chips = listOf(
-                    "频率：${stats.gpu.freqMHz ?: "--"} MHz",
-                    "温度：${stats.gpu.tempText}"   // ✅ 永不空
-                ),
-                expanded = gpuExpanded,
-                onToggle = { gpuExpanded = !gpuExpanded }
-            ) { GpuExpanded(stats) }
-
-            GaugeCard(
-                icon = Icons.Filled.Memory,
-                title = "内存",
-                subtitle = "已用",
-                progress = stats.ram.usage,
-                valueText = stats.ram.valueText,
-                chips = listOf(
-                    "可用：%.1f GB".format(stats.ram.realAvailGB),
-                    "Swap：${stats.ram.swapText}"  // ✅ 永不空
-                ),
-                expanded = ramExpanded,
-                onToggle = { ramExpanded = !ramExpanded }
-            ) { RamExpanded(stats) }
+    LazyColumn(
+        state = listState,
+        modifier = Modifier
+            .fillMaxSize()
+            .navigationBarsPadding()
+            .statusBarsPadding()
+            .imePadding(),
+        contentPadding = PaddingValues(12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        item {
+            Text(
+                text = "KPTOOL//NFC",
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = "READ | WRITE | KEYS | PROFILES",
+                fontSize = 12.sp,
+                fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
+
+        item { NFCStatusCardHacker() }
+
+        item {
+            MenuCardHacker(
+                title = "READ//DUMP",
+                description = "读取 NFC 标签数据（扇区/块）",
+                icon = Icons.Default.FileOpen
+            ) {
+                context.startActivity(Intent(context, ReadActivity::class.java))
+            }
+        }
+
+        item {
+            MenuCardHacker(
+                title = "WRITE//FLASH",
+                description = "写入数据到 NFC 标签（支持配置库）",
+                icon = Icons.Default.Edit
+            ) {
+                context.startActivity(Intent(context, WriteActivity::class.java))
+            }
+        }
+
+        item {
+            MenuCardHacker(
+                title = "SETTINGS//KEYS",
+                description = "管理密钥集（KeyA/KeyB）",
+                icon = Icons.Default.Settings
+            ) {
+                context.startActivity(Intent(context, SettingsActivity::class.java))
+            }
+        }
+
+        item {
+            MenuCardHacker(
+                title = "ABOUT//AUTHOR",
+                description = "关于作者 / 项目信息",
+                icon = Icons.Default.Person
+            ) {
+                context.startActivity(Intent(context, AboutActivity::class.java))
+            }
+        }
+
+        item { Spacer(Modifier.height(6.dp)) }
     }
 }
 
-/* ===================== 通用卡片 ===================== */
-
 @Composable
-private fun GaugeCard(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+private fun MenuCardHacker(
     title: String,
-    subtitle: String,
-    progress: Float,
-    valueText: String,
-    chips: List<String>,
-    expanded: Boolean,
-    onToggle: () -> Unit,
-    expandedContent: @Composable () -> Unit
+    description: String,
+    icon: ImageVector,
+    onClick: () -> Unit
 ) {
     Card(
+        colors = CardDefaults.cardColors(containerColor = HackerPanel),
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onToggle() }
-            .animateContentSize(),
-        shape = MaterialTheme.shapes.extraLarge,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            .clickable { onClick() }
     ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                Spacer(Modifier.width(10.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                Icon(
-                    imageVector = if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-
-            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                DonutGauge(
-                    progress = progress,
-                    centerText = if (valueText.contains("%")) valueText else "${(progress * 100).roundToInt()}%",
-                    modifier = Modifier.size(78.dp)
-                )
-                Spacer(Modifier.width(14.dp))
-
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    LinearProgressIndicator(
-                        progress = { progress.coerceIn(0f, 1f) },
-                        modifier = Modifier.fillMaxWidth().height(10.dp)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            ) {
+                Box(
+                    modifier = Modifier.padding(10.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = title,
+                        modifier = Modifier.size(22.dp),
+                        tint = MaterialTheme.colorScheme.primary
                     )
-                    FlowChips(chips)
                 }
             }
 
-            if (expanded) {
-                Divider(Modifier.padding(top = 6.dp))
-                Spacer(Modifier.height(6.dp))
-                expandedContent()
-            } else {
-                Text("点我展开细节 👇", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.width(12.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = description,
+                    fontSize = 12.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
+
+            Icon(
+                imageVector = Icons.Default.ChevronRight,
+                contentDescription = "go",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
 
 @Composable
-private fun DonutGauge(progress: Float, centerText: String, modifier: Modifier = Modifier) {
-    val p = progress.coerceIn(0f, 1f)
-    val bg = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.20f)
-    val fg = MaterialTheme.colorScheme.primary
+private fun NFCStatusCardHacker(modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
 
-    Box(modifier, contentAlignment = Alignment.Center) {
-        Canvas(Modifier.matchParentSize()) {
-            val stroke = Stroke(width = size.minDimension * 0.14f, cap = StrokeCap.Round)
-            val pad = stroke.width / 2f
-            val d = size.minDimension - pad * 2
-            val topLeft = Offset((size.width - d) / 2f, (size.height - d) / 2f)
-            val arcSize = Size(d, d)
+    var nfcState by remember { mutableStateOf(getNfcState(context)) }
 
-            drawArc(
-                color = bg,
-                startAngle = -90f,
-                sweepAngle = 360f,
-                useCenter = false,
-                topLeft = topLeft,
-                size = arcSize,
-                style = stroke
-            )
-            drawArc(
-                color = fg,
-                startAngle = -90f,
-                sweepAngle = 360f * p,
-                useCenter = false,
-                topLeft = topLeft,
-                size = arcSize,
-                style = stroke
-            )
+    // ✅ 自动刷新：从设置返回 / App 回到前台时更新
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) nfcState = getNfcState(context)
         }
-        Text(centerText, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
-}
 
-@Composable
-private fun FlowChips(items: List<String>) {
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        items.chunked(2).forEach { row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                row.forEach { text ->
-                    AssistChip(onClick = {}, label = { Text(text, maxLines = 1) })
+    val (title, desc, icon, color) = when (nfcState) {
+        NfcState.NOT_SUPPORTED -> Quad("NFC//UNSUPPORTED", "没有 NFC 硬件", Icons.Default.Block, HackerRed)
+        NfcState.ENABLED -> Quad("NFC//ONLINE", "可以直接读写 ✅", Icons.Default.Nfc, HackerGreen)
+        NfcState.DISABLED -> Quad("NFC//OFFLINE", "点一下去系统设置开启", Icons.Default.Warning, HackerOrange)
+    }
+
+    Card(
+        colors = CardDefaults.cardColors(containerColor = HackerPanel),
+        modifier = modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                Box(Modifier.padding(10.dp), contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = title,
+                        modifier = Modifier.size(22.dp),
+                        tint = color
+                    )
+                }
+            }
+
+            Spacer(Modifier.width(12.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = desc,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            if (nfcState == NfcState.DISABLED) {
+                Button(
+                    onClick = { openNfcSettings(context) },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                ) {
+                    Text("ENABLE", fontFamily = FontFamily.Monospace, color = Color.Black, fontWeight = FontWeight.Bold)
                 }
             }
         }
     }
 }
 
-@Composable
-private fun KV(k: String, v: String) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(k, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(v, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
+private fun getNfcState(context: Context): NfcState {
+    val adapter = NfcAdapter.getDefaultAdapter(context) ?: return NfcState.NOT_SUPPORTED
+    return if (adapter.isEnabled) NfcState.ENABLED else NfcState.DISABLED
+}
+
+private fun openNfcSettings(context: Context) {
+    val intent = Intent(Settings.ACTION_NFC_SETTINGS).apply {
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    runCatching { context.startActivity(intent) }.getOrElse {
+        context.startActivity(Intent(Settings.ACTION_SETTINGS).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) })
     }
 }
 
-/* ===================== 展开详情：把“来源”显示出来，确认命中哪个传感器 ===================== */
+/** 小工具：四元组 */
+private data class Quad<A, B, C, D>(val a: A, val b: B, val c: C, val d: D)
+
+/** ====== 固定暗色主题：不跟随系统（和你其他页一致） ====== */
+private val HackerBg = Color(0xFF050607)
+private val HackerPanel = Color(0xFF0B0F10)
+private val HackerSurface = Color(0xFF0F1416)
+
+private val HackerGreen = Color(0xFF00FF7A)
+private val HackerOrange = Color(0xFFFFA43A)
+private val HackerRed = Color(0xFFFF4D5A)
 
 @Composable
-private fun CpuExpanded(stats: KPToolStats) {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("CPU 温度来源：${stats.cpu.tempSource}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+private fun HackerTheme(content: @Composable () -> Unit) {
+    val scheme = darkColorScheme(
+        primary = HackerGreen,
+        background = HackerBg,
+        surface = HackerSurface,
+        surfaceVariant = Color(0xFF151C1F),
+        onPrimary = Color.Black,
+        onBackground = Color(0xFFE6F7EF),
+        onSurface = Color(0xFFE6F7EF),
+        onSurfaceVariant = Color(0xFF9AB0A6),
+        error = HackerRed
+    )
 
-        Text("每核占用", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-        if (stats.cpu.cores.isEmpty()) {
-            Text("首秒可能为 0，等 1 秒就会有数据～", style = MaterialTheme.typography.bodySmall)
-            return
-        }
-        stats.cpu.cores.forEach { c ->
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("CPU${c.index}", modifier = Modifier.width(64.dp), fontWeight = FontWeight.Medium)
-                LinearProgressIndicator(progress = { c.usage.coerceIn(0f, 1f) }, modifier = Modifier.weight(1f).height(8.dp))
-                Spacer(Modifier.width(10.dp))
-                Text(c.usageText, modifier = Modifier.width(56.dp), fontWeight = FontWeight.SemiBold)
-            }
-        }
-    }
-}
-
-@Composable
-private fun GpuExpanded(stats: KPToolStats) {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("GPU 温度来源：${stats.gpu.tempSource}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-
-        Text("读取来源（调试用）", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-        KV("利用率来源", stats.gpu.usageSource)
-        KV("频率来源", stats.gpu.freqSource)
-        KV("Devfreq路径", stats.gpu.params.devfreqBase ?: "--")
-    }
-}
-
-@Composable
-private fun RamExpanded(stats: KPToolStats) {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("Swap：${stats.ram.swapText}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        KV("已用内存", "%.2f GB".format(stats.ram.usedGB))
-        KV("被系统缓存", "%.2f GB".format(stats.ram.cachedGB))
-        KV("真实空闲内存", "%.2f GB".format(stats.ram.freeRealGB))
-        KV("实际可用内存", "%.2f GB".format(stats.ram.realAvailGB))
-    }
+    MaterialTheme(
+        colorScheme = scheme,
+        typography = Typography(),
+        content = content
+    )
 }
