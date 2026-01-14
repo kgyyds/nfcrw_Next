@@ -4,6 +4,7 @@ import android.content.Context
 import android.nfc.NfcAdapter
 import android.nfc.Tag
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.clickable
@@ -35,6 +36,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.kgapp.kptool.AppSettings
 import com.kgapp.kptool.nfc.MifareClassicTool
+import com.kgapp.kptool.nfc.ValuePayload
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -173,6 +175,44 @@ private data class LogEntry(
     val msg: String
 )
 
+private object ValuePayload {
+    fun build(value: Int, k: Int): ByteArray {
+        val v16 = value.coerceIn(0, 0xFFFF)
+        val bytes = ByteArray(16)
+        bytes[0] = (v16 and 0xFF).toByte()
+        bytes[1] = ((v16 shr 8) and 0xFF).toByte()
+        bytes[2] = 0x00
+        bytes[3] = 0x00
+        bytes[4] = 0x40
+        bytes[5] = 0x1F
+        bytes[6] = 0x00
+        bytes[7] = 0x00
+        bytes[8] = 0x00
+        bytes[9] = 0x00
+        bytes[10] = 0x01
+        bytes[11] = 0x00
+        bytes[12] = 0x00
+        bytes[13] = 0x00
+
+        var sum = 0
+        for (i in 0..13) {
+            sum += bytes[i].toInt() and 0xFF
+        }
+        val sLow = sum and 0xFF
+        bytes[14] = (k and 0xFF).toByte()
+        bytes[15] = ((sLow + (k and 0xFF)) and 0xFF).toByte()
+        return bytes
+    }
+
+    fun toHex32(bytes: ByteArray): String =
+        bytes.joinToString("") { "%02X".format(it.toInt() and 0xFF) }
+}
+
+private enum class WriteMode { MANUAL_HEX, VALUE }
+
+private val K_LIST = listOf(0x39, 0x01, 0x59, 0xC9, 0x91)
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WriteScreen(nfcAdapter: NfcAdapter?) {
     val activity = LocalContext.current as ComponentActivity
@@ -186,9 +226,15 @@ fun WriteScreen(nfcAdapter: NfcAdapter?) {
 
     // UI states
     var allowTrailer by rememberSaveable { mutableStateOf(false) }
+    var writeMode by rememberSaveable { mutableStateOf(WriteMode.VALUE) }
     var profileExpanded by rememberSaveable { mutableStateOf(true) }
     var writeExpanded by rememberSaveable { mutableStateOf(true) }
     var profileName by rememberSaveable { mutableStateOf("") }
+
+    var sliderValue by rememberSaveable { mutableStateOf(0) }
+    var inputText by rememberSaveable { mutableStateOf("0") }
+    var selectedK by rememberSaveable { mutableStateOf(K_LIST.first()) }
+    var isSyncing by remember { mutableStateOf(false) }
 
     // Items
     val items = remember {
@@ -231,6 +277,33 @@ fun WriteScreen(nfcAdapter: NfcAdapter?) {
         logEntries.add(LogEntry(ts = nowStr(), level = level, msg = line))
     }
 
+    fun normalizeSliderInput(newSlider: Int) {
+        if (isSyncing) return
+        isSyncing = true
+        val clampedSlider = newSlider.coerceIn(0, 600)
+        sliderValue = clampedSlider
+        inputText = (clampedSlider * 100).toString()
+        isSyncing = false
+    }
+
+    fun normalizeTextInput(text: String) {
+        if (isSyncing) {
+            inputText = text
+            return
+        }
+        val parsed = text.toIntOrNull()
+        if (parsed == null) {
+            inputText = text
+            return
+        }
+        val clamped = parsed.coerceIn(0, 60000)
+        val nextSlider = clamped / 100
+        isSyncing = true
+        sliderValue = nextSlider
+        inputText = (nextSlider * 100).toString()
+        isSyncing = false
+    }
+
     // ✅ 日志自动滚到最新
     LaunchedEffect(logEntries.size) {
         if (logEntries.isNotEmpty()) {
@@ -261,6 +334,49 @@ fun WriteScreen(nfcAdapter: NfcAdapter?) {
         return null
     }
 
+    fun validateValueMode(): String? {
+        if (keys.isEmpty()) return "没有可用 keys：去设置页添加并保存"
+        val inputValue = inputText.toIntOrNull() ?: return "数值输入不合法（必须是 0..60000 的数字）"
+        if (inputValue !in 0..60000) return "数值输入超范围（0..60000）"
+        if (selectedK !in K_LIST) return "K 不在允许列表中"
+        return null
+    }
+
+    val normalizedValue by remember {
+        derivedStateOf {
+            if (inputText.toIntOrNull() == null) null else sliderValue * 100
+        }
+    }
+
+    val valuePayload by remember {
+        derivedStateOf {
+            normalizedValue?.let { ValuePayload.build(it, selectedK) }
+        }
+    }
+
+    val valuePayloadHex by remember {
+        derivedStateOf { valuePayload?.let { ValuePayload.toHex32(it) } }
+    }
+
+    LaunchedEffect(writeMode) {
+        if (writeMode == WriteMode.VALUE) {
+            allowTrailer = false
+        }
+    }
+
+    val isValueInputInvalid by remember {
+        derivedStateOf { writeMode == WriteMode.VALUE && inputText.toIntOrNull() == null }
+    }
+
+    val startWriteError by remember {
+        derivedStateOf {
+            when (writeMode) {
+                WriteMode.MANUAL_HEX -> validateItems()
+                WriteMode.VALUE -> validateValueMode()
+            }
+        }
+    }
+
     fun onTag(tag: Tag) {
         if (!armed) return
         if (writingNow) return
@@ -277,7 +393,7 @@ fun WriteScreen(nfcAdapter: NfcAdapter?) {
             }
 
             log(LogLevel.INFO, "TAG DETECTED uid=$uid")
-            val err = validateItems()
+            val err = startWriteError
             if (err != null) {
                 status = "参数不合法 （仍在持续等待）"
                 log(LogLevel.ERR, "Validate fail: $err")
@@ -286,21 +402,43 @@ fun WriteScreen(nfcAdapter: NfcAdapter?) {
 
             writingNow = true
             status = "写入中…（UID=$uid）"
-            log(LogLevel.INFO, "WRITE START uid=$uid items=${items.size} trailer=${allowTrailer}")
+            val allowTrailerWrite = writeMode == WriteMode.MANUAL_HEX && allowTrailer
+            log(
+                LogLevel.INFO,
+                "WRITE START uid=$uid mode=${writeMode.name} items=${items.size} trailer=${if (allowTrailerWrite) "ON" else "OFF"}"
+            )
 
             val writeMap = LinkedHashMap<Int, ByteArray>()
-            items.forEach { itState ->
-                val block = itState.blockIndex()
-                val hex = normalizeHex(itState.hexText)
-                val s = sectorOf(block)
-                val b = indexInSector(block)
-                log(LogLevel.INFO, "PLAN  S$s B$b (abs=$block) <= $hex")
-                writeMap[block] = MifareClassicTool.hexToBytes(hex)
+            if (writeMode == WriteMode.VALUE) {
+                val payload = valuePayload ?: run {
+                    writingNow = false
+                    status = "写入失败（仍在持续等待）"
+                    log(LogLevel.ERR, "Payload build failed: value input invalid")
+                    lastUid = uid
+                    lastWriteAt = System.currentTimeMillis()
+                    return@launch
+                }
+                val hex = valuePayloadHex ?: ValuePayload.toHex32(payload)
+                val slider = sliderValue.coerceIn(0, 600)
+                val value = slider * 100
+                log(LogLevel.INFO, "VALUE value=$value dec hex=0x${"%04X".format(value)} slider=$slider")
+                log(LogLevel.INFO, "VALUE K=0x${"%02X".format(selectedK)} payload=$hex blocks=60,61")
+                writeMap[60] = payload
+                writeMap[61] = payload
+            } else {
+                items.forEach { itState ->
+                    val block = itState.blockIndex()
+                    val hex = normalizeHex(itState.hexText)
+                    val s = sectorOf(block)
+                    val b = indexInSector(block)
+                    log(LogLevel.INFO, "PLAN  S$s B$b (abs=$block) <= $hex")
+                    writeMap[block] = MifareClassicTool.hexToBytes(hex)
+                }
             }
 
             val result = runCatching {
                 withContext(Dispatchers.IO) {
-                    MifareClassicTool.writeBlocks(tag, writeMap, keys, allowTrailer)
+                    MifareClassicTool.writeBlocks(tag, writeMap, keys, allowTrailerWrite)
                 }
             }.getOrElse { e ->
                 writingNow = false
@@ -566,16 +704,38 @@ fun WriteScreen(nfcAdapter: NfcAdapter?) {
                 if (writeExpanded) {
                     Spacer(Modifier.height(12.dp))
 
+                    Text("模式选择", fontSize = 13.sp, fontFamily = FontFamily.Monospace)
+                    Spacer(Modifier.height(6.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        RadioButton(
+                            selected = writeMode == WriteMode.VALUE,
+                            onClick = { writeMode = WriteMode.VALUE }
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text("数值模式", fontFamily = FontFamily.Monospace, fontSize = 13.sp)
+                        Spacer(Modifier.width(16.dp))
+                        RadioButton(
+                            selected = writeMode == WriteMode.MANUAL_HEX,
+                            onClick = { writeMode = WriteMode.MANUAL_HEX }
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text("手动 HEX 模式", fontFamily = FontFamily.Monospace, fontSize = 13.sp)
+                    }
+
+                    Spacer(Modifier.height(10.dp))
+
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         OutlinedButton(onClick = { reloadKeys() }) { Text("加载Keys", fontFamily = FontFamily.Monospace) }
 
-                        OutlinedButton(onClick = {
-                            items.add(WriteItemState(System.currentTimeMillis(), 4, ""))
-                            log(LogLevel.INFO, "Add item => size=${items.size}")
-                        }) {
-                            Icon(Icons.Default.Add, contentDescription = "add")
-                            Spacer(Modifier.width(6.dp))
-                            Text("新增条目", fontFamily = FontFamily.Monospace)
+                        if (writeMode == WriteMode.MANUAL_HEX) {
+                            OutlinedButton(onClick = {
+                                items.add(WriteItemState(System.currentTimeMillis(), 4, ""))
+                                log(LogLevel.INFO, "Add item => size=${items.size}")
+                            }) {
+                                Icon(Icons.Default.Add, contentDescription = "add")
+                                Spacer(Modifier.width(6.dp))
+                                Text("新增条目", fontFamily = FontFamily.Monospace)
+                            }
                         }
                     }
 
@@ -587,7 +747,8 @@ fun WriteScreen(nfcAdapter: NfcAdapter?) {
                             onCheckedChange = {
                                 allowTrailer = it
                                 log(LogLevel.INFO, "Trailer write => ${if (allowTrailer) "ON" else "OFF"}")
-                            }
+                            },
+                            enabled = writeMode == WriteMode.MANUAL_HEX
                         )
                         Spacer(Modifier.width(8.dp))
                         Text("允许写 Trailer（危险）", fontSize = 13.sp, fontFamily = FontFamily.Monospace)
@@ -595,84 +756,167 @@ fun WriteScreen(nfcAdapter: NfcAdapter?) {
 
                     Spacer(Modifier.height(12.dp))
 
-                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        items.forEachIndexed { idx, item ->
-                            key(item.id) {
-                                Card(
-                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                                    modifier = Modifier.fillMaxWidth()
+                    if (writeMode == WriteMode.VALUE) {
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Text("数值输入（0..60000，自动整百）", fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                            Slider(
+                                value = sliderValue.toFloat(),
+                                onValueChange = { normalizeSliderInput(it.toInt()) },
+                                valueRange = 0f..600f,
+                                steps = 599
+                            )
+
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                OutlinedTextField(
+                                    value = inputText,
+                                    onValueChange = { normalizeTextInput(it) },
+                                    label = { Text("数值（0..60000）") },
+                                    singleLine = true,
+                                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Number),
+                                    modifier = Modifier.weight(0.7f),
+                                    textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace)
+                                )
+                                Spacer(Modifier.width(12.dp))
+                                Text(
+                                    "Slider=${sliderValue}",
+                                    fontSize = 12.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+
+                            if (isValueInputInvalid) {
+                                Text(
+                                    "请输入 0..60000 的数字",
+                                    color = HackerRed,
+                                    fontSize = 12.sp,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+
+                            var kExpanded by remember { mutableStateOf(false) }
+                            ExposedDropdownMenuBox(
+                                expanded = kExpanded,
+                                onExpandedChange = { kExpanded = !kExpanded }
+                            ) {
+                                OutlinedTextField(
+                                    value = "K = 0x%02X (%d)".format(selectedK, selectedK),
+                                    onValueChange = {},
+                                    readOnly = true,
+                                    label = { Text("K（固定列表）") },
+                                    modifier = Modifier.menuAnchor().fillMaxWidth(),
+                                    textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace)
+                                )
+                                ExposedDropdownMenu(
+                                    expanded = kExpanded,
+                                    onDismissRequest = { kExpanded = false }
                                 ) {
-                                    Column(modifier = Modifier.padding(12.dp)) {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Text(
-                                                "ITEM #${idx + 1}",
-                                                fontWeight = FontWeight.SemiBold,
-                                                fontFamily = FontFamily.Monospace,
-                                                modifier = Modifier.weight(1f)
-                                            )
-                                            IconButton(onClick = {
-                                                items.remove(item)
-                                                log(LogLevel.INFO, "Remove item => size=${items.size}")
-                                            }) {
-                                                Icon(Icons.Default.Delete, contentDescription = "delete")
+                                    K_LIST.forEach { kValue ->
+                                        DropdownMenuItem(
+                                            text = { Text("K = 0x%02X (%d)".format(kValue, kValue)) },
+                                            onClick = {
+                                                selectedK = kValue
+                                                kExpanded = false
                                             }
-                                        }
+                                        )
+                                    }
+                                }
+                            }
 
-                                        Spacer(Modifier.height(8.dp))
+                            val hex = valuePayloadHex ?: "--"
+                            Text(
+                                "Payload: $hex",
+                                fontSize = 12.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                "写入块：60, 61（两块同 payload）",
+                                fontSize = 12.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    } else {
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            items.forEachIndexed { idx, item ->
+                                key(item.id) {
+                                    Card(
+                                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Column(modifier = Modifier.padding(12.dp)) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Text(
+                                                    "ITEM #${idx + 1}",
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    fontFamily = FontFamily.Monospace,
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                                IconButton(onClick = {
+                                                    items.remove(item)
+                                                    log(LogLevel.INFO, "Remove item => size=${items.size}")
+                                                }) {
+                                                    Icon(Icons.Default.Delete, contentDescription = "delete")
+                                                }
+                                            }
 
-                                        val block = item.blockIndex()
-                                        val sector = sectorOf(block)
-                                        val bInSector = indexInSector(block)
+                                            Spacer(Modifier.height(8.dp))
 
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
+                                            val block = item.blockIndex()
+                                            val sector = sectorOf(block)
+                                            val bInSector = indexInSector(block)
+
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                OutlinedTextField(
+                                                    value = item.blockText,
+                                                    onValueChange = { v ->
+                                                        item.blockText = v.filter { it.isDigit() }.take(2)
+                                                    },
+                                                    label = { Text("Block (0-63)") },
+                                                    singleLine = true,
+                                                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Number),
+                                                    modifier = Modifier.weight(0.45f),
+                                                    textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace)
+                                                )
+
+                                                Spacer(Modifier.width(12.dp))
+
+                                                Text(
+                                                    "S$sector / B$bInSector",
+                                                    fontSize = 12.sp,
+                                                    fontFamily = FontFamily.Monospace,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    modifier = Modifier.weight(0.55f)
+                                                )
+                                            }
+
+                                            Spacer(Modifier.height(10.dp))
+
                                             OutlinedTextField(
-                                                value = item.blockText,
-                                                onValueChange = { v ->
-                                                    item.blockText = v.filter { it.isDigit() }.take(2)
-                                                },
-                                                label = { Text("Block (0-63)") },
-                                                singleLine = true,
-                                                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Number),
-                                                modifier = Modifier.weight(0.45f),
+                                                value = item.hexText,
+                                                onValueChange = { item.hexText = it },
+                                                label = { Text("HEX 16 bytes (32 chars)") },
+                                                placeholder = { Text("00112233445566778899AABBCCDDEEFF") },
+                                                modifier = Modifier.fillMaxWidth(),
                                                 textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace)
                                             )
 
-                                            Spacer(Modifier.width(12.dp))
-
-                                            Text(
-                                                "S$sector / B$bInSector",
-                                                fontSize = 12.sp,
-                                                fontFamily = FontFamily.Monospace,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                modifier = Modifier.weight(0.55f)
-                                            )
-                                        }
-
-                                        Spacer(Modifier.height(10.dp))
-
-                                        OutlinedTextField(
-                                            value = item.hexText,
-                                            onValueChange = { item.hexText = it },
-                                            label = { Text("HEX 16 bytes (32 chars)") },
-                                            placeholder = { Text("00112233445566778899AABBCCDDEEFF") },
-                                            modifier = Modifier.fillMaxWidth(),
-                                            textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace)
-                                        )
-
-                                        val hexNorm = normalizeHex(item.hexText)
-                                        val ok = isHex32(hexNorm)
-                                        val warn = when {
-                                            block == 0 -> "当前设置策略禁止写 Block 0"
-                                            (!allowTrailer && block % 4 == 3) -> "Trailer 禁止写 ，请允许写Trailer以继续"
-                                            !ok && hexNorm.isNotBlank() -> "格式错误：必须 32 个 hex"
-                                            else -> null
-                                        }
-                                        if (warn != null) {
-                                            Spacer(Modifier.height(6.dp))
-                                            Text(warn, color = HackerRed, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                                            val hexNorm = normalizeHex(item.hexText)
+                                            val ok = isHex32(hexNorm)
+                                            val warn = when {
+                                                block == 0 -> "当前设置策略禁止写 Block 0"
+                                                (!allowTrailer && block % 4 == 3) -> "Trailer 禁止写 ，请允许写Trailer以继续"
+                                                !ok && hexNorm.isNotBlank() -> "格式错误：必须 32 个 hex"
+                                                else -> null
+                                            }
+                                            if (warn != null) {
+                                                Spacer(Modifier.height(6.dp))
+                                                Text(warn, color = HackerRed, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                                            }
                                         }
                                     }
                                 }
@@ -685,7 +929,7 @@ fun WriteScreen(nfcAdapter: NfcAdapter?) {
                     Button(
                         onClick = {
                             if (!armed) {
-                                val err = validateItems()
+                                val err = startWriteError
                                 if (err != null) {
                                     status = "参数不合法 ❌"
                                     log(LogLevel.ERR, "Arm fail: $err")
@@ -694,15 +938,11 @@ fun WriteScreen(nfcAdapter: NfcAdapter?) {
                                     armed = true
                                     status = "持续写入模式 ✅（贴卡就写，点“停止写入”结束）"
                                     val activity = context as ComponentActivity
-                                    www.sanju.motiontoast.MotionToast.darkToast(
+                                    Toast.makeText(
                                         activity,
-                                        "持续写入启动",
-                                        "对识别的MCT标签进行写入",
-                                        www.sanju.motiontoast.MotionToastStyle.SUCCESS,
-                                        www.sanju.motiontoast.MotionToast.GRAVITY_BOTTOM,
-                                        www.sanju.motiontoast.MotionToast.LONG_DURATION,
-                                        null   //不传字体也行
-                                    )
+                                        "持续写入启动：对识别的MCT标签进行写入",
+                                        Toast.LENGTH_LONG
+                                    ).show()
 
 
                                     log(LogLevel.INFO, "ARMED => waiting tags…")
@@ -711,19 +951,15 @@ fun WriteScreen(nfcAdapter: NfcAdapter?) {
                                 armed = false
                                 status = "已停止写入 ⛔"
                                 val activity = context as ComponentActivity
-                                www.sanju.motiontoast.MotionToast.darkToast(
+                                Toast.makeText(
                                     activity,
-                                    "持续写入停止",
-                                    "停止对识别的MCT标签写入",
-                                    www.sanju.motiontoast.MotionToastStyle.INFO,
-                                    www.sanju.motiontoast.MotionToast.GRAVITY_BOTTOM,
-                                    www.sanju.motiontoast.MotionToast.LONG_DURATION,
-                                    null   //不传字体也行
-                                )
+                                    "持续写入停止：停止对识别的MCT标签写入",
+                                    Toast.LENGTH_LONG
+                                ).show()
                                 log(LogLevel.INFO, "DISARMED => ignore tags")
                             }
                         },
-                        enabled = !writingNow,
+                        enabled = !writingNow && (armed || startWriteError == null),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(if (armed) "停止写入" else "开始写入（持续）", fontFamily = FontFamily.Monospace)

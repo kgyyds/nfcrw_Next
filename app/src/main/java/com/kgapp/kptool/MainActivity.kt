@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.nfc.NfcAdapter
 import android.os.Bundle
+import android.widget.Toast
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -95,15 +96,11 @@ class MainActivity : ComponentActivity() {
             HackerTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
 
-                    www.sanju.motiontoast.MotionToast.darkToast(
+                    Toast.makeText(
                         this,
-                        "Activity Init",
-                        "The MainActivity is successful run at funthin setContent",
-                        www.sanju.motiontoast.MotionToastStyle.WARNING,
-                        www.sanju.motiontoast.MotionToast.GRAVITY_TOP,
-                        www.sanju.motiontoast.MotionToast.LONG_DURATION,
-                        null   //不传字体也行
-                    )
+                        "MainActivity 初始化完成",
+                        Toast.LENGTH_LONG
+                    ).show()
                     MainScreen()
                 }
             }
@@ -391,16 +388,11 @@ fun ToastTestCard() {
         modifier = Modifier
             .fillMaxWidth()
             .clickable {
-                // 🔥 MotionToast 在这里触发
-                www.sanju.motiontoast.MotionToast.darkToast(
+                Toast.makeText(
                     activity,
-                    "TEST",
-                    "MotionToast😈",
-                    www.sanju.motiontoast.MotionToastStyle.SUCCESS,
-                    www.sanju.motiontoast.MotionToast.GRAVITY_BOTTOM,
-                    www.sanju.motiontoast.MotionToast.LONG_DURATION,
-                    null   // 不传字体也行，先跑通
-                )
+                    "TEST: Toast",
+                    Toast.LENGTH_SHORT
+                ).show()
             }
     ) {
         Row(
@@ -426,7 +418,7 @@ fun ToastTestCard() {
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = "点击弹出 MotionToast",
+                    text = "点击弹出 Toast",
                     fontFamily = FontFamily.Monospace,
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant

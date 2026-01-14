@@ -15,8 +15,8 @@ android {
         minSdk = 26
         targetSdk = 36
 
-        versionName = "v1.0.2"
-        versionCode = 102
+        versionName = "v2.0.0"
+        versionCode = 200
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -96,6 +96,4 @@ dependencies {
     implementation("com.google.android.material:material:1.11.0")
 
 
-    //toast
-    implementation ("com.github.Spikeysanju:MotionToast:1.4")
 }
