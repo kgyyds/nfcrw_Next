@@ -36,6 +36,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.kgapp.kptool.AppSettings
 import com.kgapp.kptool.nfc.MifareClassicTool
+import com.kgapp.kptool.nfc.ValuePayload
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
