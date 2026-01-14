@@ -178,6 +178,7 @@ private enum class WriteMode { MANUAL_HEX, VALUE }
 
 private val K_LIST = listOf(0x39, 0x01, 0x59, 0xC9, 0x91)
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WriteScreen(nfcAdapter: NfcAdapter?) {
     val activity = LocalContext.current as ComponentActivity
