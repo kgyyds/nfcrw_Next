@@ -88,6 +88,61 @@ private data class LogLine(
     val msg: String
 )
 
+private data class AmountInfo(
+    val sourceBlock: Int,
+    val rawValue: Int,
+    val displayText: String,
+    val k: Int,
+    val checksum: Int,
+    val sLow: Int,
+    val expected: Int,
+    val checksumOk: Boolean,
+    val hex32: String
+)
+
+private fun parseAmount(blockIndex: Int, data16: ByteArray): AmountInfo {
+    val b0 = data16[0].toInt() and 0xFF
+    val b1 = data16[1].toInt() and 0xFF
+    val rawValue = (b1 shl 8) or b0
+    var sum = 0
+    for (i in 0..13) {
+        sum += data16[i].toInt() and 0xFF
+    }
+    val sLow = sum and 0xFF
+    val k = data16[14].toInt() and 0xFF
+    val checksum = data16[15].toInt() and 0xFF
+    val expected = (sLow + k) and 0xFF
+    val checksumOk = checksum == expected
+    val displayText = String.format(Locale.US, "%.2f", rawValue / 100.0)
+    val hex32 = data16.joinToString("") { "%02X".format(it.toInt() and 0xFF) }
+    return AmountInfo(
+        sourceBlock = blockIndex,
+        rawValue = rawValue,
+        displayText = displayText,
+        k = k,
+        checksum = checksum,
+        sLow = sLow,
+        expected = expected,
+        checksumOk = checksumOk,
+        hex32 = hex32
+    )
+}
+
+private fun pickAmount(b60: ByteArray?, b61: ByteArray?): Pair<AmountInfo?, String?> {
+    val block60 = b60?.takeIf { it.size == 16 }
+    val block61 = b61?.takeIf { it.size == 16 }
+    val mismatchWarn = if (block60 != null && block61 != null && !block60.contentEquals(block61)) {
+        "BLOCK MISMATCH => B60 != B61"
+    } else {
+        null
+    }
+    return when {
+        block60 != null -> parseAmount(60, block60) to mismatchWarn
+        block61 != null -> parseAmount(61, block61) to mismatchWarn
+        else -> null to mismatchWarn
+    }
+}
+
 @Composable
 fun ReadScreen(nfcAdapter: NfcAdapter?) {
     val activity = LocalContext.current as ComponentActivity
@@ -114,6 +169,9 @@ fun ReadScreen(nfcAdapter: NfcAdapter?) {
     // 最终 dump
     var output by remember { mutableStateOf("") }
     val outScroll = rememberScrollState()
+
+    var amountInfo by remember { mutableStateOf<AmountInfo?>(null) }
+    var amountWarn by remember { mutableStateOf<String?>(null) }
 
     // ✅ 实时日志（彩色）
     val logs = remember { mutableStateListOf<LogLine>() }
@@ -272,6 +330,48 @@ fun ReadScreen(nfcAdapter: NfcAdapter?) {
                 }
 
                 output = buildDumpText(uid, sectors, allMap)
+
+                val existing60 = allMap[60]
+                val existing61 = allMap[61]
+                var block60: ByteArray? = existing60
+                var block61: ByteArray? = existing61
+                if (block60 == null && block61 == null) {
+                    log(LogType.INFO, "AMOUNT EXTRA READ => blocks=60,61")
+                    val extraMap = try {
+                        withContext(Dispatchers.IO) {
+                            MifareClassicTool.readBlocks(tag, listOf(60, 61), keys)
+                        }
+                    } catch (e: Exception) {
+                        val reason = e.message ?: "未知错误"
+                        log(LogType.WARN, "AMOUNT EXTRA READ FAIL => $reason")
+                        null
+                    }
+                    block60 = extraMap?.get(60)
+                    block61 = extraMap?.get(61)
+                }
+
+                val (pickedAmount, warn) = pickAmount(block60, block61)
+                amountInfo = pickedAmount
+                amountWarn = warn
+                if (warn != null) {
+                    log(LogType.WARN, warn)
+                }
+                if (pickedAmount != null) {
+                    log(
+                        LogType.INFO,
+                        "AMOUNT => raw=${pickedAmount.rawValue} display=${pickedAmount.displayText} src=B${pickedAmount.sourceBlock}"
+                    )
+                    if (!pickedAmount.checksumOk) {
+                        log(
+                            LogType.WARN,
+                            "CHECKSUM BAD => K=0x%02X got=0x%02X exp=0x%02X".format(
+                                pickedAmount.k,
+                                pickedAmount.checksum,
+                                pickedAmount.expected
+                            )
+                        )
+                    }
+                }
 
                 status = if (failCount == 0) {
                     "READ DONE ✅ ok=$okCount fail=$failCount"
@@ -464,6 +564,71 @@ fun ReadScreen(nfcAdapter: NfcAdapter?) {
                 fontFamily = FontFamily.Monospace,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+        }
+
+        item {
+            HackerCard {
+                Text(
+                    "AMOUNT//PARSE (B60/B61)",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    fontFamily = FontFamily.Monospace
+                )
+                Spacer(Modifier.height(10.dp))
+
+                val warnColor = Color(0xFFB7FF4A)
+
+                if (amountInfo != null) {
+                    val info = amountInfo!!
+                    val statusColor = if (info.checksumOk) HackerGreen else HackerRed
+                    Text(
+                        "Amount: ${info.displayText} (raw=${info.rawValue})",
+                        fontSize = 12.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                    Text(
+                        "Source: B${info.sourceBlock}",
+                        fontSize = 12.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                    Text(
+                        "K: 0x%02X  checksum: 0x%02X  expected: 0x%02X".format(
+                            info.k,
+                            info.checksum,
+                            info.expected
+                        ),
+                        fontSize = 12.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                    Text(
+                        "Status: ${if (info.checksumOk) "CHECKSUM OK" else "CHECKSUM BAD"}",
+                        fontSize = 12.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = statusColor
+                    )
+                    if (amountWarn != null) {
+                        Text(
+                            amountWarn!!,
+                            fontSize = 12.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = warnColor
+                        )
+                    }
+                    Text(
+                        "Hex: ${info.hex32}",
+                        fontSize = 12.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    Text(
+                        "未读取到 60/61（请确认密钥或贴卡重试）",
+                        fontSize = 12.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
         }
 
         /** ===================== 实时日志 ===================== */
