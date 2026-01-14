@@ -96,6 +96,4 @@ dependencies {
     implementation("com.google.android.material:material:1.11.0")
 
 
-    //toast
-    implementation ("com.github.Spikeysanju:MotionToast:1.4")
 }

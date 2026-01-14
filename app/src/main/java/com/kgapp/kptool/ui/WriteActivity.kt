@@ -4,6 +4,7 @@ import android.content.Context
 import android.nfc.NfcAdapter
 import android.nfc.Tag
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.clickable
@@ -904,15 +905,11 @@ fun WriteScreen(nfcAdapter: NfcAdapter?) {
                                     armed = true
                                     status = "持续写入模式 ✅（贴卡就写，点“停止写入”结束）"
                                     val activity = context as ComponentActivity
-                                    www.sanju.motiontoast.MotionToast.darkToast(
+                                    Toast.makeText(
                                         activity,
-                                        "持续写入启动",
-                                        "对识别的MCT标签进行写入",
-                                        www.sanju.motiontoast.MotionToastStyle.SUCCESS,
-                                        www.sanju.motiontoast.MotionToast.GRAVITY_BOTTOM,
-                                        www.sanju.motiontoast.MotionToast.LONG_DURATION,
-                                        null   //不传字体也行
-                                    )
+                                        "持续写入启动：对识别的MCT标签进行写入",
+                                        Toast.LENGTH_LONG
+                                    ).show()
 
 
                                     log(LogLevel.INFO, "ARMED => waiting tags…")
@@ -921,15 +918,11 @@ fun WriteScreen(nfcAdapter: NfcAdapter?) {
                                 armed = false
                                 status = "已停止写入 ⛔"
                                 val activity = context as ComponentActivity
-                                www.sanju.motiontoast.MotionToast.darkToast(
+                                Toast.makeText(
                                     activity,
-                                    "持续写入停止",
-                                    "停止对识别的MCT标签写入",
-                                    www.sanju.motiontoast.MotionToastStyle.INFO,
-                                    www.sanju.motiontoast.MotionToast.GRAVITY_BOTTOM,
-                                    www.sanju.motiontoast.MotionToast.LONG_DURATION,
-                                    null   //不传字体也行
-                                )
+                                    "持续写入停止：停止对识别的MCT标签写入",
+                                    Toast.LENGTH_LONG
+                                ).show()
                                 log(LogLevel.INFO, "DISARMED => ignore tags")
                             }
                         },
