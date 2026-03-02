@@ -5,6 +5,7 @@ import android.content.Context
 object AppSettings {
     private const val PREFS = "kptool_prefs"
     private const val KEY_KEYS_TEXT = "keys_text"
+    private const val KEY_DETAILED_LOGS = "detailed_logs_enabled"
 
     // 默认 key（你也可以加更多）
     private val DEFAULT_KEYS_TEXT = """
@@ -22,6 +23,16 @@ object AppSettings {
     fun setKeysText(context: Context, text: String) {
         val sp = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         sp.edit().putString(KEY_KEYS_TEXT, text).apply()
+    }
+
+    fun isDetailedLogsEnabled(context: Context): Boolean {
+        val sp = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        return sp.getBoolean(KEY_DETAILED_LOGS, false)
+    }
+
+    fun setDetailedLogsEnabled(context: Context, enabled: Boolean) {
+        val sp = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        sp.edit().putBoolean(KEY_DETAILED_LOGS, enabled).apply()
     }
 
     /** 把 keys 文本解析成 ByteArray 列表（自动过滤空行/注释/非法行） */

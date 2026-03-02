@@ -217,6 +217,7 @@ private val K_LIST = listOf(0x39, 0x01, 0x59, 0xC9, 0x91)
 fun WriteScreen(nfcAdapter: NfcAdapter?) {
     val activity = LocalContext.current as ComponentActivity
     val context = LocalContext.current
+    val showDetailedLogs = remember { AppSettings.isDetailedLogsEnabled(context) }
     val scope = rememberCoroutineScope()
 
     // Keys
@@ -251,8 +252,8 @@ fun WriteScreen(nfcAdapter: NfcAdapter?) {
     val logEntries = remember { mutableStateListOf<LogEntry>() }
     val logListState = rememberLazyListState()
 
-    // 持续写入状态
-    var armed by remember { mutableStateOf(false) }         // 持续写入开关
+    // 手动写入状态
+    var armed by remember { mutableStateOf(false) }         // 手动触发后等待一次贴卡
     var writingNow by remember { mutableStateOf(false) }    // 写入中（防并发）
     var lastUid by remember { mutableStateOf<String?>(null) }   // 防抖：上一次写入的UID
     var lastWriteAt by remember { mutableStateOf(0L) }          // 防抖：上一次写入时间
@@ -274,6 +275,7 @@ fun WriteScreen(nfcAdapter: NfcAdapter?) {
     fun indexInSector(block: Int): Int = block % 4
 
     fun log(level: LogLevel, line: String) {
+        if (!showDetailedLogs) return
         logEntries.add(LogEntry(ts = nowStr(), level = level, msg = line))
     }
 
@@ -442,10 +444,11 @@ fun WriteScreen(nfcAdapter: NfcAdapter?) {
                 }
             }.getOrElse { e ->
                 writingNow = false
-                status = "写入失败（仍在持续等待）"
+                status = "写入失败 ❌"
                 log(LogLevel.ERR, "WRITE EXCEPTION uid=$uid msg=${e.message ?: "UNKNOWN"}")
                 lastUid = uid
                 lastWriteAt = System.currentTimeMillis()
+                armed = false
                 return@launch
             }
 
@@ -467,11 +470,8 @@ fun WriteScreen(nfcAdapter: NfcAdapter?) {
             lastUid = uid
             lastWriteAt = System.currentTimeMillis()
 
-            status = if (armed) {
-                if (allOk) "写入完成 ✅（继续等待贴卡）" else "部分失败 ⚠️（继续等待贴卡）"
-            } else {
-                if (allOk) "写入完成 ✅" else "部分失败 ⚠️"
-            }
+            armed = false
+            status = if (allOk) "写入完成 ✅" else "部分失败 ⚠️"
         }
     }
 
@@ -936,16 +936,16 @@ fun WriteScreen(nfcAdapter: NfcAdapter?) {
                                     armed = false
                                 } else {
                                     armed = true
-                                    status = "持续写入模式 ✅（贴卡就写，点“停止写入”结束）"
+                                    status = "请贴卡执行一次写入 ✍️"
                                     val activity = context as ComponentActivity
                                     Toast.makeText(
                                         activity,
-                                        "持续写入启动：对识别的MCT标签进行写入",
+                                        "写入已就绪：请贴卡执行一次",
                                         Toast.LENGTH_LONG
                                     ).show()
 
 
-                                    log(LogLevel.INFO, "ARMED => waiting tags…")
+                                    log(LogLevel.INFO, "ARMED => waiting one tag write")
                                 }
                             } else {
                                 armed = false
@@ -962,7 +962,7 @@ fun WriteScreen(nfcAdapter: NfcAdapter?) {
                         enabled = !writingNow && (armed || startWriteError == null),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text(if (armed) "停止写入" else "开始写入（持续）", fontFamily = FontFamily.Monospace)
+                        Text(if (armed) "取消写入" else "开始写入（手动）", fontFamily = FontFamily.Monospace)
                     }
                 }
             }
@@ -978,7 +978,7 @@ fun WriteScreen(nfcAdapter: NfcAdapter?) {
         }
 
         /** ===================== 日志卡片 ===================== */
-        item {
+        if (showDetailedLogs) item {
             HackerCard {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(

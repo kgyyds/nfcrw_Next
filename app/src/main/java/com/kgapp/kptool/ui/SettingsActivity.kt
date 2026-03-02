@@ -69,6 +69,7 @@ fun SettingsScreen() {
 
     var keysText by remember { mutableStateOf(AppSettings.getKeysText(context)) }
     var keyCount by remember { mutableStateOf(AppSettings.parseKeysFromText(keysText).size) }
+    var detailedLogsEnabled by remember { mutableStateOf(AppSettings.isDetailedLogsEnabled(context)) }
 
     fun refreshCount() {
         keyCount = AppSettings.parseKeysFromText(keysText).size
@@ -221,6 +222,53 @@ fun SettingsScreen() {
                 color = HackerOrange
             )
         }
+
+
+
+        Spacer(Modifier.height(12.dp))
+
+        HackerCard {
+            Text(
+                text = "LOG//DETAIL",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold,
+                fontFamily = FontFamily.Monospace
+            )
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = if (detailedLogsEnabled) "详细日志：已开启" else "详细日志：已关闭",
+                    fontSize = 12.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f)
+                )
+                Switch(
+                    checked = detailedLogsEnabled,
+                    onCheckedChange = { enabled ->
+                        detailedLogsEnabled = enabled
+                        AppSettings.setDetailedLogsEnabled(context, enabled)
+                        val activity = context as ComponentActivity
+                        Toast.makeText(
+                            activity,
+                            if (enabled) "已开启详细日志" else "已关闭详细日志",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                )
+            }
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = "关闭后，读写界面不显示详细日志面板。",
+                fontSize = 12.sp,
+                fontFamily = FontFamily.Monospace,
+                color = HackerOrange
+            )
+        }
+
 
         Spacer(Modifier.height(8.dp))
     }
