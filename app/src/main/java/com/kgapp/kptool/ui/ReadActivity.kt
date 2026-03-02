@@ -177,8 +177,9 @@ fun ReadScreen(nfcAdapter: NfcAdapter?) {
     val logs = remember { mutableStateListOf<LogLine>() }
     val logListState = rememberLazyListState()
 
-    // 防并发
+    // 防并发 + 手动触发
     var readingNow by remember { mutableStateOf(false) }
+    var armedRead by remember { mutableStateOf(false) }
 
     fun nowStr(): String =
         SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
@@ -257,9 +258,10 @@ fun ReadScreen(nfcAdapter: NfcAdapter?) {
     }
 
     fun onTag(tag: Tag) {
-        if (readingNow) return
+        if (!armedRead || readingNow) return
 
         scope.launch {
+            armedRead = false
             val sectors = selectedSectors()
             if (keys.isEmpty()) {
                 status = "没有可用 keys 请先在设置添加"
@@ -424,6 +426,61 @@ fun ReadScreen(nfcAdapter: NfcAdapter?) {
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = HackerGreen.copy(alpha = 0.18f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.fillMaxWidth().padding(14.dp)) {
+                    Text(
+                        text = "剩余金额",
+                        fontSize = 13.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = Color(0xFFB8FFD8)
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = amountInfo?.displayText?.let { "¥$it" } ?: "--",
+                        fontSize = 34.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        color = HackerGreen
+                    )
+                    if (amountWarn != null) {
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = amountWarn!!,
+                            fontSize = 12.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = Color(0xFFB7FF4A)
+                        )
+                    }
+                }
+            }
+        }
+
+        item {
+            Button(
+                onClick = {
+                    if (keys.isEmpty()) {
+                        status = "没有可用 keys 请先在设置添加"
+                        log(LogType.ERROR, "NO KEYS => go Settings")
+                    } else if (selectedSectors().isEmpty()) {
+                        status = "未勾选任何扇区"
+                        log(LogType.WARN, "NO SECTOR SELECTED")
+                    } else {
+                        armedRead = true
+                        status = "请贴卡执行一次读取 📶"
+                        log(LogType.INFO, "ARMED READ => waiting one tag")
+                    }
+                },
+                enabled = !readingNow,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(if (armedRead) "等待贴卡中…" else "开始读取（手动）", fontFamily = FontFamily.Monospace)
+            }
+        }
+
         item {
             Text(
                 text = "READ//MIFARE",
@@ -718,7 +775,7 @@ fun ReadScreen(nfcAdapter: NfcAdapter?) {
                             .verticalScroll(outScroll)
                     ) {
                         Text(
-                            text = if (output.isBlank()) "暂无结果，贴卡开始读取～" else output,
+                            text = if (output.isBlank()) "暂无结果，点击上方按钮后贴卡读取～" else output,
                             fontSize = 12.sp,
                             fontFamily = FontFamily.Monospace,
                             color = MaterialTheme.colorScheme.onSurface
