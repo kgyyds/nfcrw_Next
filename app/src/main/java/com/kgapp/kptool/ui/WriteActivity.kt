@@ -217,6 +217,7 @@ private val K_LIST = listOf(0x39, 0x01, 0x59, 0xC9, 0x91)
 fun WriteScreen(nfcAdapter: NfcAdapter?) {
     val activity = LocalContext.current as ComponentActivity
     val context = LocalContext.current
+    val showDetailedLogs = remember { AppSettings.isDetailedLogsEnabled(context) }
     val scope = rememberCoroutineScope()
 
     // Keys
@@ -274,6 +275,7 @@ fun WriteScreen(nfcAdapter: NfcAdapter?) {
     fun indexInSector(block: Int): Int = block % 4
 
     fun log(level: LogLevel, line: String) {
+        if (!showDetailedLogs) return
         logEntries.add(LogEntry(ts = nowStr(), level = level, msg = line))
     }
 
@@ -976,7 +978,7 @@ fun WriteScreen(nfcAdapter: NfcAdapter?) {
         }
 
         /** ===================== 日志卡片 ===================== */
-        item {
+        if (showDetailedLogs) item {
             HackerCard {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(

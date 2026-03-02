@@ -148,6 +148,7 @@ private fun pickAmount(b60: ByteArray?, b61: ByteArray?): Pair<AmountInfo?, Stri
 fun ReadScreen(nfcAdapter: NfcAdapter?) {
     val activity = LocalContext.current as ComponentActivity
     val context = LocalContext.current
+    val showDetailedLogs = remember { AppSettings.isDetailedLogsEnabled(context) }
     val scope = rememberCoroutineScope()
 
     val maxSector = 15 // Mifare Classic 1K：0..15
@@ -193,6 +194,7 @@ fun ReadScreen(nfcAdapter: NfcAdapter?) {
         bytes.joinToString("") { "%02X".format(it.toInt() and 0xFF) }
 
     fun log(type: LogType, msg: String) {
+        if (!showDetailedLogs) return
         logs.add(LogLine(nowStr(), type, msg))
     }
 
@@ -762,7 +764,7 @@ fun ReadScreen(nfcAdapter: NfcAdapter?) {
         }
 
         /** ===================== 实时日志 ===================== */
-        item {
+        if (showDetailedLogs) item {
             HackerCard {
                 Text(
                     "RUN//LOG",
