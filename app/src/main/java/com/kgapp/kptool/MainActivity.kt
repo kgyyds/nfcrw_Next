@@ -144,23 +144,14 @@ fun MainScreen() {
 
         item {
             MenuCardHacker(
-                title = "READ//DUMP",
-                description = "读取 NFC 标签数据（扇区/块）",
+                title = "READ//WRITE",
+                description = "读取余额 / 固定金额写入（同一界面）",
                 icon = Icons.Default.FileOpen
             ) {
                 context.startActivity(Intent(context, ReadActivity::class.java))
             }
         }
 
-        item {
-            MenuCardHacker(
-                title = "WRITE//FLASH",
-                description = "写入数据到 NFC 标签（支持配置库）",
-                icon = Icons.Default.Edit
-            ) {
-                context.startActivity(Intent(context, WriteActivity::class.java))
-            }
-        }
 
         item {
             MenuCardHacker(

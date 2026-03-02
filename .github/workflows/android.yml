@@ -32,21 +32,14 @@ jobs:
       - name: 设置Gradlew权限
         run: chmod +x gradlew
 
-      - name: 构建APK
-        run: |
-          if [ "${{ github.ref_type }}" = "tag" ]; then
-            echo "当前为标签触发，构建Release APK"
-            ./gradlew assembleRelease
-          else
-            echo "当前无标签，构建Debug APK"
-            ./gradlew assembleDebug
-          fi
+      - name: 构建Release APK
+        run: ./gradlew assembleRelease
 
       - name: 上传APK到Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: app-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: app-release-apk
+          path: app/build/outputs/apk/release/app-release.apk
 
       # tag 才创建 GitHub Release
       - name: 创建Release并上传APK
@@ -81,5 +74,5 @@ jobs:
 
           ossutil cp \
             app/build/outputs/apk/release/app-release.apk \
-            oss://kgyydsgithub/ci-builds/app-debug.apk \
+            oss://kgyydsgithub/ci-builds/app-release.apk \
             -f

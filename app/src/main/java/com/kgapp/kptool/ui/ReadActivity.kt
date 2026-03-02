@@ -35,6 +35,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.kgapp.kptool.AppSettings
 import com.kgapp.kptool.nfc.MifareClassicTool
+import com.kgapp.kptool.nfc.ValuePayload
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -177,8 +178,11 @@ fun ReadScreen(nfcAdapter: NfcAdapter?) {
     val logs = remember { mutableStateListOf<LogLine>() }
     val logListState = rememberLazyListState()
 
-    // 防并发
+    // 防并发 + 手动触发
     var readingNow by remember { mutableStateOf(false) }
+    var pendingAction by remember { mutableStateOf("NONE") }
+    val fixedAmounts = listOf(20, 50, 100, 200)
+    var selectedWriteAmount by rememberSaveable { mutableStateOf(20) }
 
     fun nowStr(): String =
         SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
@@ -257,16 +261,18 @@ fun ReadScreen(nfcAdapter: NfcAdapter?) {
     }
 
     fun onTag(tag: Tag) {
-        if (readingNow) return
+        if (pendingAction == "NONE" || readingNow) return
 
         scope.launch {
+            val action = pendingAction
+            pendingAction = "NONE"
             val sectors = selectedSectors()
             if (keys.isEmpty()) {
                 status = "没有可用 keys 请先在设置添加"
                 log(LogType.ERROR, "NO KEYS => go Settings")
                 return@launch
             }
-            if (sectors.isEmpty()) {
+            if (action == "READ" && sectors.isEmpty()) {
                 status = "未勾选任何扇区"
                 log(LogType.WARN, "NO SECTOR SELECTED")
                 return@launch
@@ -275,6 +281,20 @@ fun ReadScreen(nfcAdapter: NfcAdapter?) {
             readingNow = true
             try {
                 val uid = runCatching { bytesToHex(tag.id ?: byteArrayOf()) }.getOrDefault("UNKNOWN")
+                if (action == "WRITE") {
+                    status = "WRITING… uid=$uid"
+                    val payload = ValuePayload.build(selectedWriteAmount * 100, 0x39)
+                    val writeMap = linkedMapOf(60 to payload, 61 to payload)
+                    val writeResult = withContext(Dispatchers.IO) {
+                        MifareClassicTool.writeBlocks(tag, writeMap, keys, false)
+                    }
+                    val allOk = writeResult.allSuccess
+                    amountInfo = parseAmount(60, payload)
+                    amountWarn = null
+                    status = if (allOk) "WRITE DONE ✅ amount=$selectedWriteAmount" else "WRITE DONE ⚠️ 部分失败"
+                    log(if (allOk) LogType.OK else LogType.WARN, "WRITE amount=$selectedWriteAmount uid=$uid allOk=$allOk")
+                    return@launch
+                }
                 status = "READING… uid=$uid"
 
                 log(LogType.INFO, "TAG DETECTED => UID=$uid")
@@ -424,6 +444,97 @@ fun ReadScreen(nfcAdapter: NfcAdapter?) {
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = HackerGreen.copy(alpha = 0.18f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.fillMaxWidth().padding(14.dp)) {
+                    Text(
+                        text = "剩余金额",
+                        fontSize = 13.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = Color(0xFFB8FFD8)
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = amountInfo?.displayText?.let { "¥$it" } ?: "--",
+                        fontSize = 34.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        color = HackerGreen
+                    )
+                    if (amountWarn != null) {
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = amountWarn!!,
+                            fontSize = 12.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = Color(0xFFB7FF4A)
+                        )
+                    }
+                }
+            }
+        }
+
+        item {
+            Button(
+                onClick = {
+                    if (keys.isEmpty()) {
+                        status = "没有可用 keys 请先在设置添加"
+                        log(LogType.ERROR, "NO KEYS => go Settings")
+                    } else if (selectedSectors().isEmpty()) {
+                        status = "未勾选任何扇区"
+                        log(LogType.WARN, "NO SECTOR SELECTED")
+                    } else {
+                        pendingAction = "READ"
+                        status = "请贴卡执行一次读取 📶"
+                        log(LogType.INFO, "ARMED READ => waiting one tag")
+                    }
+                },
+                enabled = !readingNow,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(if (pendingAction == "READ") "等待贴卡中…" else "开始读取（手动）", fontFamily = FontFamily.Monospace)
+            }
+        }
+
+        item {
+            HackerCard {
+                Text(
+                    "WRITE//AMOUNT",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    fontFamily = FontFamily.Monospace
+                )
+                Spacer(Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    fixedAmounts.forEach { amount ->
+                        FilterChip(
+                            selected = selectedWriteAmount == amount,
+                            onClick = { selectedWriteAmount = amount },
+                            label = { Text("¥$amount", fontFamily = FontFamily.Monospace) }
+                        )
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                Button(
+                    onClick = {
+                        pendingAction = "WRITE"
+                        status = "请贴卡执行一次写入 ¥$selectedWriteAmount ✍️"
+                        log(LogType.INFO, "ARMED WRITE => amount=$selectedWriteAmount")
+                    },
+                    enabled = !readingNow,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        if (pendingAction == "WRITE") "等待贴卡写入中…" else "开始写入（手动）",
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+            }
+        }
+
         item {
             Text(
                 text = "READ//MIFARE",
@@ -718,7 +829,7 @@ fun ReadScreen(nfcAdapter: NfcAdapter?) {
                             .verticalScroll(outScroll)
                     ) {
                         Text(
-                            text = if (output.isBlank()) "暂无结果，贴卡开始读取～" else output,
+                            text = if (output.isBlank()) "暂无结果，点击上方按钮后贴卡读取～" else output,
                             fontSize = 12.sp,
                             fontFamily = FontFamily.Monospace,
                             color = MaterialTheme.colorScheme.onSurface
