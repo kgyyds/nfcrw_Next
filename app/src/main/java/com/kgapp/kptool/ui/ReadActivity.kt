@@ -182,7 +182,9 @@ fun ReadScreen(nfcAdapter: NfcAdapter?) {
     var readingNow by remember { mutableStateOf(false) }
     var pendingAction by remember { mutableStateOf("NONE") }
     val fixedAmounts = listOf(20, 50, 100, 200)
+    val kOptions = listOf(0x39, 0x01, 0x59, 0xC9, 0x91)
     var selectedWriteAmount by rememberSaveable { mutableStateOf(20) }
+    var selectedK by rememberSaveable { mutableStateOf(kOptions.first()) }
 
     fun nowStr(): String =
         SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
@@ -283,7 +285,7 @@ fun ReadScreen(nfcAdapter: NfcAdapter?) {
                 val uid = runCatching { bytesToHex(tag.id ?: byteArrayOf()) }.getOrDefault("UNKNOWN")
                 if (action == "WRITE") {
                     status = "WRITING… uid=$uid"
-                    val payload = ValuePayload.build(selectedWriteAmount * 100, 0x39)
+                    val payload = ValuePayload.build(selectedWriteAmount * 100, selectedK)
                     val writeMap = linkedMapOf(60 to payload, 61 to payload)
                     val writeResult = withContext(Dispatchers.IO) {
                         MifareClassicTool.writeBlocks(tag, writeMap, keys, false)
@@ -292,7 +294,7 @@ fun ReadScreen(nfcAdapter: NfcAdapter?) {
                     amountInfo = parseAmount(60, payload)
                     amountWarn = null
                     status = if (allOk) "WRITE DONE ✅ amount=$selectedWriteAmount" else "WRITE DONE ⚠️ 部分失败"
-                    log(if (allOk) LogType.OK else LogType.WARN, "WRITE amount=$selectedWriteAmount uid=$uid allOk=$allOk")
+                    log(if (allOk) LogType.OK else LogType.WARN, "WRITE amount=$selectedWriteAmount k=0x${"%02X".format(selectedK)} uid=$uid allOk=$allOk")
                     return@launch
                 }
                 status = "READING… uid=$uid"
@@ -518,11 +520,28 @@ fun ReadScreen(nfcAdapter: NfcAdapter?) {
                     }
                 }
                 Spacer(Modifier.height(10.dp))
+                Text(
+                    text = "K值选择：0x%02X".format(selectedK),
+                    fontSize = 12.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    kOptions.forEach { kValue ->
+                        FilterChip(
+                            selected = selectedK == kValue,
+                            onClick = { selectedK = kValue },
+                            label = { Text("0x%02X".format(kValue), fontFamily = FontFamily.Monospace) }
+                        )
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
                 Button(
                     onClick = {
                         pendingAction = "WRITE"
-                        status = "请贴卡执行一次写入 ¥$selectedWriteAmount ✍️"
-                        log(LogType.INFO, "ARMED WRITE => amount=$selectedWriteAmount")
+                        status = "请贴卡执行一次写入 ¥$selectedWriteAmount / K=0x%02X ✍️".format(selectedK)
+                        log(LogType.INFO, "ARMED WRITE => amount=$selectedWriteAmount k=0x${"%02X".format(selectedK)}")
                     },
                     enabled = !readingNow,
                     modifier = Modifier.fillMaxWidth()
