@@ -1,4 +1,4 @@
-package com.kgapp.kptool.ui
+package com.app33.sofw.ui
 
 import android.content.Context
 import android.nfc.NfcAdapter
@@ -34,10 +34,10 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import com.kgapp.kptool.AppSession
-import com.kgapp.kptool.AppSettings
-import com.kgapp.kptool.nfc.MifareClassicTool
-import com.kgapp.kptool.nfc.ValuePayload
+import com.app33.sofw.AppSession
+import com.app33.sofw.AppSettings
+import com.app33.sofw.nfc.MifareClassicTool
+import com.app33.sofw.nfc.ValuePayload
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
