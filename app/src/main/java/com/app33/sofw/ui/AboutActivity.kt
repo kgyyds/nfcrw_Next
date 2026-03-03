@@ -1,4 +1,4 @@
-package com.kgapp.kptool.ui
+package com.app33.sofw.ui
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity

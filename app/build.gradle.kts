@@ -7,11 +7,11 @@ plugins {
 }
 
 android {
-    namespace = "com.kgapp.kptool"
+    namespace = "com.app33.sofw"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.kgapp.kptool"
+        applicationId = "com.app33.sofw"
         minSdk = 26
         targetSdk = 36
 

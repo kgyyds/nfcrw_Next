@@ -1,4 +1,4 @@
-package com.kgapp.kptool.nfc
+package com.app33.sofw.nfc
 
 import android.nfc.Tag
 import android.nfc.tech.MifareClassic

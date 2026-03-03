@@ -1,4 +1,4 @@
-package com.kgapp.kptool.ui
+package com.app33.sofw.ui
 
 import android.os.Bundle
 import android.widget.Toast
@@ -34,7 +34,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import com.kgapp.kptool.AppSettings
+import com.app33.sofw.AppSettings
 
 class SettingsActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
