@@ -34,6 +34,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import com.kgapp.kptool.AppSession
 import com.kgapp.kptool.AppSettings
 import com.kgapp.kptool.nfc.MifareClassicTool
 import com.kgapp.kptool.nfc.ValuePayload
@@ -220,9 +221,9 @@ fun WriteScreen(nfcAdapter: NfcAdapter?) {
     val showDetailedLogs = remember { AppSettings.isDetailedLogsEnabled(context) }
     val scope = rememberCoroutineScope()
 
-    // Keys
+    // Keys（登录后从云端获取）
     var keys by remember {
-        mutableStateOf(AppSettings.parseKeysFromText(AppSettings.getKeysText(context)))
+        mutableStateOf(AppSession.getRuntimeInfo()?.keys ?: emptyList())
     }
 
     // UI states
@@ -314,13 +315,13 @@ fun WriteScreen(nfcAdapter: NfcAdapter?) {
     }
 
     fun reloadKeys() {
-        keys = AppSettings.parseKeysFromText(AppSettings.getKeysText(context))
-        status = "已加载 keys：${keys.size} 个"
-        log(LogLevel.INFO, "Reload keys => ${keys.size}")
+        keys = AppSession.getRuntimeInfo()?.keys ?: emptyList()
+        status = "已同步云端 keys：${keys.size} 个"
+        log(LogLevel.INFO, "Cloud keys sync => ${keys.size}")
     }
 
     fun validateItems(): String? {
-        if (keys.isEmpty()) return "没有可用 keys：去设置页添加并保存"
+        if (keys.isEmpty()) return "没有可用云端 keys：请重新登录"
         if (items.isEmpty()) return "至少添加一个要写的 block"
 
         for (it in items) {
@@ -337,7 +338,7 @@ fun WriteScreen(nfcAdapter: NfcAdapter?) {
     }
 
     fun validateValueMode(): String? {
-        if (keys.isEmpty()) return "没有可用 keys：去设置页添加并保存"
+        if (keys.isEmpty()) return "没有可用云端 keys：请重新登录"
         val inputValue = inputText.toIntOrNull() ?: return "数值输入不合法（必须是 0..60000 的数字）"
         if (inputValue !in 0..60000) return "数值输入超范围（0..60000）"
         if (selectedK !in K_LIST) return "K 不在允许列表中"

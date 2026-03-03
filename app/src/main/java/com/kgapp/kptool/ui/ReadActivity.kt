@@ -33,6 +33,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import com.kgapp.kptool.AppSession
 import com.kgapp.kptool.AppSettings
 import com.kgapp.kptool.nfc.MifareClassicTool
 import com.kgapp.kptool.nfc.ValuePayload
@@ -152,10 +153,13 @@ fun ReadScreen(nfcAdapter: NfcAdapter?) {
     val scope = rememberCoroutineScope()
 
     val maxSector = 15 // Mifare Classic 1K：0..15
+    val runtimeInfo = remember { AppSession.getRuntimeInfo() }
+    val isSectorSelectable = runtimeInfo?.sector == 100
+    val fixedSector = runtimeInfo?.sector?.takeIf { it in 0..maxSector }
 
-    // keys：从设置里读
+    // keys：登录后从云端获取
     var keys by remember {
-        mutableStateOf(AppSettings.parseKeysFromText(AppSettings.getKeysText(context)))
+        mutableStateOf(runtimeInfo?.keys ?: emptyList())
     }
 
     // ✅ 用 SnapshotStateList 避免 copyOf() 卡顿
@@ -199,13 +203,14 @@ fun ReadScreen(nfcAdapter: NfcAdapter?) {
     }
 
     fun reloadKeys() {
-        keys = AppSettings.parseKeysFromText(AppSettings.getKeysText(context))
-        status = "已加载 keys：${keys.size} 个"
-        log(LogType.INFO, "KEYS RELOAD => ${keys.size}")
+        keys = AppSession.getRuntimeInfo()?.keys ?: emptyList()
+        status = "已同步云端 keys：${keys.size} 个"
+        log(LogType.INFO, "CLOUD KEYS SYNC => ${keys.size}")
     }
 
     fun selectedSectors(): List<Int> =
-        checkedSectors.mapIndexedNotNull { idx, v -> if (v) idx else null }
+        if (isSectorSelectable) checkedSectors.mapIndexedNotNull { idx, v -> if (v) idx else null }
+        else fixedSector?.let { listOf(it) } ?: emptyList()
 
     fun sectorSummary(): String {
         val s = selectedSectors()
@@ -272,7 +277,7 @@ fun ReadScreen(nfcAdapter: NfcAdapter?) {
             pendingAction = "NONE"
             val sectors = selectedSectors()
             if (keys.isEmpty()) {
-                status = "没有可用 keys 请先在设置添加"
+                status = "没有可用云端 keys，请先登录"
                 log(LogType.ERROR, "NO KEYS => go Settings")
                 return@launch
             }
@@ -287,8 +292,10 @@ fun ReadScreen(nfcAdapter: NfcAdapter?) {
                 val uid = runCatching { bytesToHex(tag.id ?: byteArrayOf()) }.getOrDefault("UNKNOWN")
                 if (action == "WRITE") {
                     status = "WRITING… uid=$uid"
+                    val targetSector = selectedSectors().firstOrNull() ?: fixedSector ?: 15
+                    val baseBlock = targetSector * 4
                     val payload = ValuePayload.build(selectedWriteAmount * 100, selectedK)
-                    val writeMap = linkedMapOf(60 to payload, 61 to payload)
+                    val writeMap = linkedMapOf(baseBlock to payload, (baseBlock + 1) to payload)
                     val writeResult = withContext(Dispatchers.IO) {
                         MifareClassicTool.writeBlocks(tag, writeMap, keys, false)
                     }
@@ -355,15 +362,17 @@ fun ReadScreen(nfcAdapter: NfcAdapter?) {
 
                 output = buildDumpText(uid, sectors, allMap)
 
-                val existing60 = allMap[60]
-                val existing61 = allMap[61]
+                val targetSector = selectedSectors().firstOrNull() ?: fixedSector ?: 15
+                val baseBlock = targetSector * 4
+                val existing60 = allMap[baseBlock]
+                val existing61 = allMap[baseBlock + 1]
                 var block60: ByteArray? = existing60
                 var block61: ByteArray? = existing61
                 if (block60 == null && block61 == null) {
                     log(LogType.INFO, "AMOUNT EXTRA READ => blocks=60,61")
                     val extraMap = try {
                         withContext(Dispatchers.IO) {
-                            MifareClassicTool.readBlocks(tag, listOf(60, 61), keys)
+                            MifareClassicTool.readBlocks(tag, listOf(baseBlock, baseBlock + 1), keys)
                         }
                     } catch (e: Exception) {
                         val reason = e.message ?: "未知错误"
@@ -485,7 +494,7 @@ fun ReadScreen(nfcAdapter: NfcAdapter?) {
             Button(
                 onClick = {
                     if (keys.isEmpty()) {
-                        status = "没有可用 keys 请先在设置添加"
+                        status = "没有可用云端 keys，请先登录"
                         log(LogType.ERROR, "NO KEYS => go Settings")
                     } else if (selectedSectors().isEmpty()) {
                         status = "未勾选任何扇区"
@@ -566,15 +575,15 @@ fun ReadScreen(nfcAdapter: NfcAdapter?) {
             )
             Spacer(Modifier.height(6.dp))
             Text(
-                text = "SECTORS=${maxSector + 1} | ${sectorSummary()} | TRAILER=${if (includeTrailer) "ON" else "OFF"} | KEYS=${keys.size}",
+                text = "SECTOR_MODE=${if (isSectorSelectable) "SELECTABLE" else "FIXED"} | ${sectorSummary()} | TRAILER=${if (includeTrailer) "ON" else "OFF"} | KEYS=${keys.size}",
                 fontFamily = FontFamily.Monospace,
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
 
-        // 扇区选择卡片（可折叠）
-        item {
+        // 扇区选择卡片（仅 sector=100 时可选）
+        if (isSectorSelectable) item {
             HackerCard {
                 val interaction = remember { MutableInteractionSource() }
                 Row(
@@ -686,6 +695,25 @@ fun ReadScreen(nfcAdapter: NfcAdapter?) {
                         }
                     }
                 }
+            }
+        }
+
+
+        if (!isSectorSelectable) item {
+            HackerCard {
+                Text(
+                    "SECTOR POLICY",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    fontFamily = FontFamily.Monospace
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "当前为固定扇区：S${fixedSector ?: "?"}（由服务端 info.php 下发）",
+                    fontSize = 12.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
 
