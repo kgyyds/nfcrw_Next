@@ -48,6 +48,7 @@ import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -93,6 +94,13 @@ data class InfoResult(
     val data: RuntimeCardInfo? = null
 )
 
+data class NoticeResult(
+    val success: Boolean,
+    val msg: String,
+    val notice: String = "",
+    val latestVersion: Int? = null
+)
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -124,8 +132,21 @@ private fun RootScreen() {
 private fun LoginScreen(onSuccess: (LoginInfo) -> Unit) {
     var cardCode by remember { mutableStateOf("") }
     var loginError by remember { mutableStateOf<String?>(null) }
+    var noticeText by remember { mutableStateOf("公告加载中...") }
+    var requireUpdate by remember { mutableStateOf(false) }
     var isLoading by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+
+    LaunchedEffect(Unit) {
+        val notice = fetchVersionNotice()
+        noticeText = when {
+            notice.notice.isNotBlank() -> notice.notice
+            notice.success -> "暂无公告"
+            else -> notice.msg
+        }
+        val latestVersion = notice.latestVersion
+        requireUpdate = latestVersion != null && latestVersion > BuildConfig.VERSION_CODE
+    }
 
     Column(
         modifier = Modifier.fillMaxSize().navigationBarsPadding().statusBarsPadding().imePadding().padding(horizontal = 16.dp),
@@ -136,6 +157,20 @@ private fun LoginScreen(onSuccess: (LoginInfo) -> Unit) {
             Column(modifier = Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("LOGIN//KPTOOL", fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, fontSize = 18.sp, color = MaterialTheme.colorScheme.primary)
                 Text("输入卡密后登录", fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    text = "公告：$noticeText",
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 12.sp,
+                    color = if (requireUpdate) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (requireUpdate) {
+                    Text(
+                        text = "检测到新版本，当前版本过低，请先更新",
+                        color = MaterialTheme.colorScheme.error,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 12.sp
+                    )
+                }
 
                 OutlinedTextField(
                     value = cardCode,
@@ -151,6 +186,10 @@ private fun LoginScreen(onSuccess: (LoginInfo) -> Unit) {
 
                 Button(
                     onClick = {
+                        if (requireUpdate) {
+                            loginError = "检测到新版本，请更新后再登录"
+                            return@Button
+                        }
                         if (cardCode.isBlank()) {
                             loginError = "卡密不能为空"
                             return@Button
@@ -173,14 +212,22 @@ private fun LoginScreen(onSuccess: (LoginInfo) -> Unit) {
                             onSuccess(login.data)
                         }
                     },
-                    enabled = !isLoading,
+                    enabled = !isLoading && !requireUpdate,
                     modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (requireUpdate) Color.Gray else MaterialTheme.colorScheme.primary,
+                        disabledContainerColor = Color.Gray
+                    )
                 ) {
                     if (isLoading) {
                         CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.Black, strokeWidth = 2.dp)
                     } else {
-                        Text("登录", color = Color.Black, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                        Text(
+                            if (requireUpdate) "需要更新" else "登录",
+                            color = Color.Black,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                 }
             }
@@ -332,6 +379,31 @@ private suspend fun loginWithCardCode(cardCode: String): LoginResult = withConte
             LoginResult(true, msg, LoginInfo(data.optString("card_code", cardCode), if (data.isNull("card_no")) null else data.optString("card_no"), data.optInt("remain_times", 0), data.optInt("allow_amount", 0)))
         } else LoginResult(false, msg)
     }.getOrElse { LoginResult(false, "网络异常：${it.message ?: "未知错误"}") }.also { connection.disconnect() }
+}
+
+private suspend fun fetchVersionNotice(): NoticeResult = withContext(Dispatchers.IO) {
+    val connection = (URL("https://api.33app.top/version.php").openConnection() as HttpURLConnection).apply {
+        requestMethod = "GET"
+        connectTimeout = 8000
+        readTimeout = 8000
+        doInput = true
+    }
+    runCatching {
+        val body = connection.inputStream.bufferedReader().use { it.readText() }
+        val json = JSONObject(body)
+        val code = json.optInt("code", -1)
+        val msg = json.optString("msg", "unknown")
+        if (code == 0) {
+            val data = json.optJSONObject("data")
+            val notice = data?.optString("notice", "") ?: ""
+            val latestVersion = data?.optString("latest_version", "")?.toIntOrNull()
+            NoticeResult(true, msg, notice, latestVersion)
+        } else {
+            NoticeResult(false, msg)
+        }
+    }.getOrElse {
+        NoticeResult(false, "公告拉取失败：${it.message ?: "未知错误"}")
+    }.also { connection.disconnect() }
 }
 
 private suspend fun fetchRuntimeInfo(cardCode: String): InfoResult = withContext(Dispatchers.IO) {
