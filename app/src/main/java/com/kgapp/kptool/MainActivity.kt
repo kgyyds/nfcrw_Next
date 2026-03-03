@@ -4,7 +4,6 @@ import android.content.Context
 import android.content.Intent
 import android.nfc.NfcAdapter
 import android.os.Bundle
-import android.widget.Toast
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -29,7 +28,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.CreditCard
 import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.Nfc
 import androidx.compose.material.icons.filled.Person
@@ -39,8 +38,10 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.Typography
@@ -50,6 +51,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -68,40 +70,40 @@ import androidx.lifecycle.LifecycleEventObserver
 import com.kgapp.kptool.ui.AboutActivity
 import com.kgapp.kptool.ui.ReadActivity
 import com.kgapp.kptool.ui.SettingsActivity
-import com.kgapp.kptool.ui.WriteActivity
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
+import java.io.OutputStreamWriter
+import java.net.HttpURLConnection
+import java.net.URL
+import java.net.URLEncoder
 
 private enum class NfcState { NOT_SUPPORTED, DISABLED, ENABLED }
+
+data class LoginResult(
+    val success: Boolean,
+    val msg: String,
+    val data: LoginInfo? = null
+)
+
+data class InfoResult(
+    val success: Boolean,
+    val msg: String,
+    val data: RuntimeCardInfo? = null
+)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-        // ✅ UI 不和状态栏合并（保留系统状态栏区域）
         WindowCompat.setDecorFitsSystemWindows(window, true)
-
-        /*
-        //hide 状态栏
-        ViewCompat.setOnApplyWindowInsetsListener(window.decorView) { v, insets ->
-            val controller = ViewCompat.getWindowInsetsController(v)
-            controller?.hide(WindowInsetsCompat.Type.statusBars())
-            insets
-        }
-        */
-
-        // ✅ 状态栏暗色 + 浅色图标
         window.statusBarColor = android.graphics.Color.parseColor("#050607")
         WindowInsetsControllerCompat(window, window.decorView).isAppearanceLightStatusBars = false
 
         setContent {
             HackerTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-
-                    Toast.makeText(
-                        this,
-                        "MainActivity 初始化完成",
-                        Toast.LENGTH_LONG
-                    ).show()
-                    MainScreen()
+                    RootScreen()
                 }
             }
         }
@@ -109,139 +111,165 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun MainScreen() {
+private fun RootScreen() {
+    var loginInfo by remember { mutableStateOf(AppSession.getLoginInfo()) }
+    if (loginInfo == null) {
+        LoginScreen(onSuccess = { loginInfo = it })
+    } else {
+        MainMenuScreen(loginInfo = loginInfo!!)
+    }
+}
+
+@Composable
+private fun LoginScreen(onSuccess: (LoginInfo) -> Unit) {
+    var cardCode by remember { mutableStateOf("") }
+    var loginError by remember { mutableStateOf<String?>(null) }
+    var isLoading by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    Column(
+        modifier = Modifier.fillMaxSize().navigationBarsPadding().statusBarsPadding().imePadding().padding(horizontal = 16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Card(colors = CardDefaults.cardColors(containerColor = HackerPanel), modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("LOGIN//KPTOOL", fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, fontSize = 18.sp, color = MaterialTheme.colorScheme.primary)
+                Text("输入卡密后登录", fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+                OutlinedTextField(
+                    value = cardCode,
+                    onValueChange = { cardCode = it; loginError = null },
+                    singleLine = true,
+                    label = { Text("CARD_CODE", fontFamily = FontFamily.Monospace) },
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                if (!loginError.isNullOrEmpty()) {
+                    Text(loginError!!, color = MaterialTheme.colorScheme.error, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+                }
+
+                Button(
+                    onClick = {
+                        if (cardCode.isBlank()) {
+                            loginError = "卡密不能为空"
+                            return@Button
+                        }
+                        isLoading = true
+                        scope.launch {
+                            val login = loginWithCardCode(cardCode.trim())
+                            if (!login.success || login.data == null) {
+                                isLoading = false
+                                loginError = login.msg
+                                return@launch
+                            }
+                            val info = fetchRuntimeInfo(login.data.cardCode)
+                            isLoading = false
+                            if (!info.success || info.data == null) {
+                                loginError = info.msg
+                                return@launch
+                            }
+                            AppSession.updateSession(login.data, info.data)
+                            onSuccess(login.data)
+                        }
+                    },
+                    enabled = !isLoading,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                ) {
+                    if (isLoading) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.Black, strokeWidth = 2.dp)
+                    } else {
+                        Text("登录", color = Color.Black, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MainMenuScreen(loginInfo: LoginInfo) {
     val context = LocalContext.current
     val listState = rememberLazyListState()
+    val runtimeInfo = AppSession.getRuntimeInfo()
 
     LazyColumn(
         state = listState,
-        modifier = Modifier
-            .fillMaxSize()
-            .navigationBarsPadding()
-            .statusBarsPadding()
-            .imePadding(),
+        modifier = Modifier.fillMaxSize().navigationBarsPadding().statusBarsPadding().imePadding(),
         contentPadding = PaddingValues(12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
-            Text(
-                text = "KPTOOL//NFC",
-                fontSize = 24.sp,
-                fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Monospace,
-                color = MaterialTheme.colorScheme.primary
-            )
+            Text("KPTOOL//NFC", fontSize = 24.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.height(6.dp))
-            Text(
-                text = "READ | WRITE | KEYS | PROFILES",
-                fontSize = 12.sp,
-                fontFamily = FontFamily.Monospace,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            Text("READ | WRITE | KEYS | PROFILES", fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
 
+        item { LoginInfoCard(loginInfo = loginInfo, runtimeInfo = runtimeInfo) }
         item { NFCStatusCardHacker() }
 
         item {
-            MenuCardHacker(
-                title = "READ//WRITE",
-                description = "读取余额 / 固定金额写入（同一界面）",
-                icon = Icons.Default.FileOpen
-            ) {
+            MenuCardHacker("READ//WRITE", "读取余额 / 固定金额写入（同一界面）", Icons.Default.FileOpen) {
                 context.startActivity(Intent(context, ReadActivity::class.java))
             }
         }
-
-
         item {
-            MenuCardHacker(
-                title = "SETTINGS//KEYS",
-                description = "管理密钥集（KeyA/KeyB）",
-                icon = Icons.Default.Settings
-            ) {
+            MenuCardHacker("SETTINGS", "应用设置（日志开关）", Icons.Default.Settings) {
                 context.startActivity(Intent(context, SettingsActivity::class.java))
             }
         }
-
         item {
-            MenuCardHacker(
-                title = "ABOUT//AUTHOR",
-                description = "关于作者 / 项目信息",
-                icon = Icons.Default.Person
-            ) {
+            MenuCardHacker("ABOUT//AUTHOR", "关于作者 / 项目信息", Icons.Default.Person) {
                 context.startActivity(Intent(context, AboutActivity::class.java))
             }
         }
-        //test toast
-        item {
-            ToastTestCard()
-        }
-
-
-
-        item { Spacer(Modifier.height(6.dp)) }
     }
 }
 
 @Composable
-private fun MenuCardHacker(
-    title: String,
-    description: String,
-    icon: ImageVector,
-    onClick: () -> Unit
-) {
-    Card(
-        colors = CardDefaults.cardColors(containerColor = HackerPanel),
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onClick() }
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Card(
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            ) {
-                Box(
-                    modifier = Modifier.padding(10.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = title,
-                        modifier = Modifier.size(22.dp),
-                        tint = MaterialTheme.colorScheme.primary
-                    )
+private fun LoginInfoCard(loginInfo: LoginInfo, runtimeInfo: RuntimeCardInfo?) {
+    Card(colors = CardDefaults.cardColors(containerColor = HackerPanel), modifier = Modifier.fillMaxWidth()) {
+        Row(modifier = Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                Box(Modifier.padding(10.dp), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Default.CreditCard, "card info", modifier = Modifier.size(22.dp), tint = MaterialTheme.colorScheme.primary)
                 }
             }
-
             Spacer(Modifier.width(12.dp))
-
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = title,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    fontFamily = FontFamily.Monospace,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
+                Text("CARD//INFO", fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface)
                 Spacer(Modifier.height(4.dp))
-                Text(
-                    text = description,
-                    fontSize = 12.sp,
-                    fontFamily = FontFamily.Monospace,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Text("卡密: ${loginInfo.cardCode}", fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("绑定卡号: ${loginInfo.cardNo ?: "未绑定"}", fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("剩余次数: ${loginInfo.remainTimes} | 单次金额: ${loginInfo.allowAmount}", fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                val sectorText = when (runtimeInfo?.sector) {
+                    null -> "未知"
+                    100 -> "可选(100)"
+                    else -> "固定 S${runtimeInfo.sector}"
+                }
+                Text("扇区策略: $sectorText | 秘钥: ${runtimeInfo?.keys?.size ?: 0} 个", fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
+        }
+    }
+}
 
-            Icon(
-                imageVector = Icons.Default.ChevronRight,
-                contentDescription = "go",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+@Composable
+private fun MenuCardHacker(title: String, description: String, icon: ImageVector, onClick: () -> Unit) { /* unchanged */
+    Card(colors = CardDefaults.cardColors(containerColor = HackerPanel), modifier = Modifier.fillMaxWidth().clickable { onClick() }) {
+        Row(modifier = Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                Box(modifier = Modifier.padding(10.dp), contentAlignment = Alignment.Center) {
+                    Icon(imageVector = icon, contentDescription = title, modifier = Modifier.size(22.dp), tint = MaterialTheme.colorScheme.primary)
+                }
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(title, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurface)
+                Spacer(Modifier.height(4.dp))
+                Text(description, fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Icon(imageVector = Icons.Default.ChevronRight, contentDescription = "go", tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -250,69 +278,32 @@ private fun MenuCardHacker(
 private fun NFCStatusCardHacker(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-
     var nfcState by remember { mutableStateOf(getNfcState(context)) }
-
-    // ✅ 自动刷新：从设置返回 / App 回到前台时更新
     DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) nfcState = getNfcState(context)
-        }
+        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_RESUME) nfcState = getNfcState(context) }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
-
     val (title, desc, icon, color) = when (nfcState) {
         NfcState.NOT_SUPPORTED -> Quad("NFC//UNSUPPORTED", "没有 NFC 硬件", Icons.Default.Block, HackerRed)
         NfcState.ENABLED -> Quad("NFC//ONLINE", "可以直接读写 ✅", Icons.Default.Nfc, HackerGreen)
         NfcState.DISABLED -> Quad("NFC//OFFLINE", "等待授权", Icons.Default.Warning, HackerOrange)
     }
-
-    Card(
-        colors = CardDefaults.cardColors(containerColor = HackerPanel),
-        modifier = modifier.fillMaxWidth()
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+    Card(colors = CardDefaults.cardColors(containerColor = HackerPanel), modifier = modifier.fillMaxWidth()) {
+        Row(modifier = Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
                 Box(Modifier.padding(10.dp), contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = title,
-                        modifier = Modifier.size(22.dp),
-                        tint = color
-                    )
+                    Icon(icon, title, modifier = Modifier.size(22.dp), tint = color)
                 }
             }
-
             Spacer(Modifier.width(12.dp))
-
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = title,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
+                Text(title, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface)
                 Spacer(Modifier.height(4.dp))
-                Text(
-                    text = desc,
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Text(desc, fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-
             if (nfcState == NfcState.DISABLED) {
-                Button(
-                    onClick = { openNfcSettings(context) },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-                ) {
+                Button(onClick = { openNfcSettings(context) }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)) {
                     Text("ENABLE", fontFamily = FontFamily.Monospace, color = Color.Black, fontWeight = FontWeight.Bold)
                 }
             }
@@ -320,28 +311,91 @@ private fun NFCStatusCardHacker(modifier: Modifier = Modifier) {
     }
 }
 
+private suspend fun loginWithCardCode(cardCode: String): LoginResult = withContext(Dispatchers.IO) {
+    val connection = (URL("https://api.33app.top/login.php").openConnection() as HttpURLConnection).apply {
+        requestMethod = "POST"
+        connectTimeout = 10_000
+        readTimeout = 10_000
+        doOutput = true
+        setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+    }
+    return@withContext runCatching {
+        val body = "card_code=${URLEncoder.encode(cardCode, "UTF-8")}"
+        OutputStreamWriter(connection.outputStream).use { it.write(body) }
+        val responseText = (if (connection.responseCode in 200..299) connection.inputStream else connection.errorStream ?: connection.inputStream)
+            .bufferedReader().use { it.readText() }
+        val json = JSONObject(responseText)
+        val code = json.optInt("code", -1)
+        val msg = json.optString("msg", "未知错误")
+        if (code == 0) {
+            val data = json.getJSONObject("data")
+            LoginResult(true, msg, LoginInfo(data.optString("card_code", cardCode), if (data.isNull("card_no")) null else data.optString("card_no"), data.optInt("remain_times", 0), data.optInt("allow_amount", 0)))
+        } else LoginResult(false, msg)
+    }.getOrElse { LoginResult(false, "网络异常：${it.message ?: "未知错误"}") }.also { connection.disconnect() }
+}
+
+private suspend fun fetchRuntimeInfo(cardCode: String): InfoResult = withContext(Dispatchers.IO) {
+    val connection = (URL("https://api.33app.top/info.php").openConnection() as HttpURLConnection).apply {
+        requestMethod = "POST"
+        connectTimeout = 10_000
+        readTimeout = 10_000
+        doOutput = true
+        setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+    }
+    return@withContext runCatching {
+        val body = "card_code=${URLEncoder.encode(cardCode, "UTF-8")}"
+        OutputStreamWriter(connection.outputStream).use { it.write(body) }
+        val responseText = (if (connection.responseCode in 200..299) connection.inputStream else connection.errorStream ?: connection.inputStream)
+            .bufferedReader().use { it.readText() }
+        val json = JSONObject(responseText)
+        val code = json.optInt("code", -1)
+        val msg = json.optString("msg", "未知错误")
+        if (code != 0) return@runCatching InfoResult(false, msg)
+
+        val data = json.getJSONObject("data")
+        val keysArray = data.optJSONArray("keys")
+        val keysHex = ArrayList<String>()
+        val keysBytes = ArrayList<ByteArray>()
+        if (keysArray != null) {
+            for (i in 0 until keysArray.length()) {
+                val key = keysArray.optString(i, "").trim().uppercase()
+                if (key.matches(Regex("[0-9A-F]{12}"))) {
+                    keysHex.add(key)
+                    keysBytes.add(hexToBytes(key))
+                }
+            }
+        }
+        if (keysBytes.isEmpty()) return@runCatching InfoResult(false, "服务器未返回可用秘钥")
+
+        InfoResult(
+            true,
+            msg,
+            RuntimeCardInfo(
+                cardCode = data.optString("card_code", cardCode),
+                cardNo = if (data.isNull("card_no")) null else data.optString("card_no"),
+                sector = data.optInt("sector", 100),
+                keysHex = keysHex,
+                keys = keysBytes
+            )
+        )
+    }.getOrElse { InfoResult(false, "获取秘钥失败：${it.message ?: "未知错误"}") }.also { connection.disconnect() }
+}
+
+private fun hexToBytes(hex: String): ByteArray = ByteArray(hex.length / 2) { i -> hex.substring(i * 2, i * 2 + 2).toInt(16).toByte() }
 private fun getNfcState(context: Context): NfcState {
     val adapter = NfcAdapter.getDefaultAdapter(context) ?: return NfcState.NOT_SUPPORTED
     return if (adapter.isEnabled) NfcState.ENABLED else NfcState.DISABLED
 }
-
 private fun openNfcSettings(context: Context) {
-    val intent = Intent(Settings.ACTION_NFC_SETTINGS).apply {
-        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    }
+    val intent = Intent(Settings.ACTION_NFC_SETTINGS).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
     runCatching { context.startActivity(intent) }.getOrElse {
         context.startActivity(Intent(Settings.ACTION_SETTINGS).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) })
     }
 }
-
-/** 小工具：四元组 */
 private data class Quad<A, B, C, D>(val a: A, val b: B, val c: C, val d: D)
-
-/** ====== 固定暗色主题：不跟随系统（和你其他页一致） ====== */
 private val HackerBg = Color(0xFF050607)
 private val HackerPanel = Color(0xFF0B0F10)
 private val HackerSurface = Color(0xFF0F1416)
-
 private val HackerGreen = Color(0xFF00FF7A)
 private val HackerOrange = Color(0xFFFFA43A)
 private val HackerRed = Color(0xFFFF4D5A)
@@ -359,62 +413,5 @@ private fun HackerTheme(content: @Composable () -> Unit) {
         onSurfaceVariant = Color(0xFF9AB0A6),
         error = HackerRed
     )
-
-    MaterialTheme(
-        colorScheme = scheme,
-        typography = Typography(),
-        content = content
-    )
-}
-
-
-
-@Composable
-fun ToastTestCard() {
-    val context = LocalContext.current
-    val activity = context as ComponentActivity   // ⭐关键点
-
-    Card(
-        colors = CardDefaults.cardColors(containerColor = HackerPanel),
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable {
-                Toast.makeText(
-                    activity,
-                    "TEST: Toast",
-                    Toast.LENGTH_SHORT
-                ).show()
-            }
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                imageVector = Icons.Default.Warning,
-                contentDescription = "toast",
-                tint = HackerGreen,
-                modifier = Modifier.size(22.dp)
-            )
-
-            Spacer(Modifier.width(12.dp))
-
-            Column {
-                Text(
-                    text = "TEST//TOAST",
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Text(
-                    text = "点击弹出 Toast",
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-    }
+    MaterialTheme(colorScheme = scheme, typography = Typography(), content = content)
 }

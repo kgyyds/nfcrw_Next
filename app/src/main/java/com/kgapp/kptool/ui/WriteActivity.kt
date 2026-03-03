@@ -34,6 +34,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import com.kgapp.kptool.AppSession
 import com.kgapp.kptool.AppSettings
 import com.kgapp.kptool.nfc.MifareClassicTool
 import com.kgapp.kptool.nfc.ValuePayload
@@ -220,9 +221,12 @@ fun WriteScreen(nfcAdapter: NfcAdapter?) {
     val showDetailedLogs = remember { AppSettings.isDetailedLogsEnabled(context) }
     val scope = rememberCoroutineScope()
 
-    // Keys
+    val loginInfo = remember { AppSession.getLoginInfo() }
+    val serverAllowAmount = (loginInfo?.allowAmount ?: 0).coerceAtLeast(0)
+
+    // Keys（登录后从云端获取）
     var keys by remember {
-        mutableStateOf(AppSettings.parseKeysFromText(AppSettings.getKeysText(context)))
+        mutableStateOf(AppSession.getRuntimeInfo()?.keys ?: emptyList())
     }
 
     // UI states
@@ -314,13 +318,13 @@ fun WriteScreen(nfcAdapter: NfcAdapter?) {
     }
 
     fun reloadKeys() {
-        keys = AppSettings.parseKeysFromText(AppSettings.getKeysText(context))
-        status = "已加载 keys：${keys.size} 个"
-        log(LogLevel.INFO, "Reload keys => ${keys.size}")
+        keys = AppSession.getRuntimeInfo()?.keys ?: emptyList()
+        status = "已同步云端 keys：${keys.size} 个"
+        log(LogLevel.INFO, "Cloud keys sync => ${keys.size}")
     }
 
     fun validateItems(): String? {
-        if (keys.isEmpty()) return "没有可用 keys：去设置页添加并保存"
+        if (keys.isEmpty()) return "没有可用云端 keys：请重新登录"
         if (items.isEmpty()) return "至少添加一个要写的 block"
 
         for (it in items) {
@@ -337,17 +341,14 @@ fun WriteScreen(nfcAdapter: NfcAdapter?) {
     }
 
     fun validateValueMode(): String? {
-        if (keys.isEmpty()) return "没有可用 keys：去设置页添加并保存"
-        val inputValue = inputText.toIntOrNull() ?: return "数值输入不合法（必须是 0..60000 的数字）"
-        if (inputValue !in 0..60000) return "数值输入超范围（0..60000）"
+        if (keys.isEmpty()) return "没有可用云端 keys：请重新登录"
+        if (serverAllowAmount <= 0) return "服务器下发金额异常（allow_amount<=0）"
         if (selectedK !in K_LIST) return "K 不在允许列表中"
         return null
     }
 
-    val normalizedValue by remember {
-        derivedStateOf {
-            if (inputText.toIntOrNull() == null) null else sliderValue * 100
-        }
+    val normalizedValue by remember(serverAllowAmount) {
+        derivedStateOf { serverAllowAmount * 100 }
     }
 
     val valuePayload by remember {
@@ -364,10 +365,6 @@ fun WriteScreen(nfcAdapter: NfcAdapter?) {
         if (writeMode == WriteMode.VALUE) {
             allowTrailer = false
         }
-    }
-
-    val isValueInputInvalid by remember {
-        derivedStateOf { writeMode == WriteMode.VALUE && inputText.toIntOrNull() == null }
     }
 
     val startWriteError by remember {
@@ -421,9 +418,8 @@ fun WriteScreen(nfcAdapter: NfcAdapter?) {
                     return@launch
                 }
                 val hex = valuePayloadHex ?: ValuePayload.toHex32(payload)
-                val slider = sliderValue.coerceIn(0, 600)
-                val value = slider * 100
-                log(LogLevel.INFO, "VALUE value=$value dec hex=0x${"%04X".format(value)} slider=$slider")
+                val value = serverAllowAmount * 100
+                log(LogLevel.INFO, "VALUE value=$value dec hex=0x${"%04X".format(value)} allow_amount=$serverAllowAmount")
                 log(LogLevel.INFO, "VALUE K=0x${"%02X".format(selectedK)} payload=$hex blocks=60,61")
                 writeMap[60] = payload
                 writeMap[61] = payload
@@ -758,41 +754,14 @@ fun WriteScreen(nfcAdapter: NfcAdapter?) {
 
                     if (writeMode == WriteMode.VALUE) {
                         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Text("数值输入（0..60000，自动整百）", fontSize = 12.sp, fontFamily = FontFamily.Monospace)
-                            Slider(
-                                value = sliderValue.toFloat(),
-                                onValueChange = { normalizeSliderInput(it.toInt()) },
-                                valueRange = 0f..600f,
-                                steps = 599
+                            Text("金额由服务端 allow_amount 固定下发，不可自定义", fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                            Text(
+                                text = "当前刷入金额：¥$serverAllowAmount",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                fontFamily = FontFamily.Monospace,
+                                color = MaterialTheme.colorScheme.primary
                             )
-
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                OutlinedTextField(
-                                    value = inputText,
-                                    onValueChange = { normalizeTextInput(it) },
-                                    label = { Text("数值（0..60000）") },
-                                    singleLine = true,
-                                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Number),
-                                    modifier = Modifier.weight(0.7f),
-                                    textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace)
-                                )
-                                Spacer(Modifier.width(12.dp))
-                                Text(
-                                    "Slider=${sliderValue}",
-                                    fontSize = 12.sp,
-                                    fontFamily = FontFamily.Monospace,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-
-                            if (isValueInputInvalid) {
-                                Text(
-                                    "请输入 0..60000 的数字",
-                                    color = HackerRed,
-                                    fontSize = 12.sp,
-                                    fontFamily = FontFamily.Monospace
-                                )
-                            }
 
                             var kExpanded by remember { mutableStateOf(false) }
                             ExposedDropdownMenuBox(
