@@ -152,6 +152,9 @@ fun ReadScreen(nfcAdapter: NfcAdapter?) {
     val showDetailedLogs = remember { AppSettings.isDetailedLogsEnabled(context) }
     val scope = rememberCoroutineScope()
 
+    val loginInfo = remember { AppSession.getLoginInfo() }
+    val serverAllowAmount = (loginInfo?.allowAmount ?: 0).coerceAtLeast(0)
+
     val maxSector = 15 // Mifare Classic 1K：0..15
     val runtimeInfo = remember { AppSession.getRuntimeInfo() }
     val isSectorSelectable = runtimeInfo?.sector == 100
@@ -186,9 +189,7 @@ fun ReadScreen(nfcAdapter: NfcAdapter?) {
     // 防并发 + 手动触发
     var readingNow by remember { mutableStateOf(false) }
     var pendingAction by remember { mutableStateOf("NONE") }
-    val fixedAmounts = listOf(20, 50, 100, 200)
     val kOptions = listOf(0x39, 0x01, 0x59, 0xC9, 0x91)
-    var selectedWriteAmount by rememberSaveable { mutableStateOf(20) }
     var selectedK by rememberSaveable { mutableStateOf(kOptions.first()) }
 
     fun nowStr(): String =
@@ -294,7 +295,7 @@ fun ReadScreen(nfcAdapter: NfcAdapter?) {
                     status = "WRITING… uid=$uid"
                     val targetSector = selectedSectors().firstOrNull() ?: fixedSector ?: 15
                     val baseBlock = targetSector * 4
-                    val payload = ValuePayload.build(selectedWriteAmount * 100, selectedK)
+                    val payload = ValuePayload.build(serverAllowAmount * 100, selectedK)
                     val writeMap = linkedMapOf(baseBlock to payload, (baseBlock + 1) to payload)
                     val writeResult = withContext(Dispatchers.IO) {
                         MifareClassicTool.writeBlocks(tag, writeMap, keys, false)
@@ -302,8 +303,8 @@ fun ReadScreen(nfcAdapter: NfcAdapter?) {
                     val allOk = writeResult.allSuccess
                     amountInfo = parseAmount(60, payload)
                     amountWarn = null
-                    status = if (allOk) "WRITE DONE ✅ amount=$selectedWriteAmount" else "WRITE DONE ⚠️ 部分失败"
-                    log(if (allOk) LogType.OK else LogType.WARN, "WRITE amount=$selectedWriteAmount k=0x${"%02X".format(selectedK)} uid=$uid allOk=$allOk")
+                    status = if (allOk) "WRITE DONE ✅ amount=$serverAllowAmount" else "WRITE DONE ⚠️ 部分失败"
+                    log(if (allOk) LogType.OK else LogType.WARN, "WRITE amount=$serverAllowAmount k=0x${"%02X".format(selectedK)} uid=$uid allOk=$allOk")
                     return@launch
                 }
                 status = "READING… uid=$uid"
@@ -521,15 +522,12 @@ fun ReadScreen(nfcAdapter: NfcAdapter?) {
                     fontFamily = FontFamily.Monospace
                 )
                 Spacer(Modifier.height(10.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                    fixedAmounts.forEach { amount ->
-                        FilterChip(
-                            selected = selectedWriteAmount == amount,
-                            onClick = { selectedWriteAmount = amount },
-                            label = { Text("¥$amount", fontFamily = FontFamily.Monospace) }
-                        )
-                    }
-                }
+                Text(
+                    text = "刷入金额由服务端下发（allow_amount）：¥$serverAllowAmount",
+                    fontSize = 12.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
                 Spacer(Modifier.height(10.dp))
                 Text(
                     text = "K值选择：0x%02X".format(selectedK),
@@ -551,8 +549,8 @@ fun ReadScreen(nfcAdapter: NfcAdapter?) {
                 Button(
                     onClick = {
                         pendingAction = "WRITE"
-                        status = "请贴卡执行一次写入 ¥$selectedWriteAmount / K=0x%02X ✍️".format(selectedK)
-                        log(LogType.INFO, "ARMED WRITE => amount=$selectedWriteAmount k=0x${"%02X".format(selectedK)}")
+                        status = "请贴卡执行一次写入 ¥$serverAllowAmount / K=0x%02X ✍️".format(selectedK)
+                        log(LogType.INFO, "ARMED WRITE => amount=$serverAllowAmount k=0x${"%02X".format(selectedK)}")
                     },
                     enabled = !readingNow,
                     modifier = Modifier.fillMaxWidth()
