@@ -162,6 +162,30 @@ private data class ConfirmResult(
     val msg: String,
 )
 
+
+private fun extractCardNoFromBlockData(data: ByteArray): String? {
+    val ascii = buildString {
+        data.forEach {
+            val c = (it.toInt() and 0xFF).toChar()
+            append(if (c.code in 32..126) c else ' ')
+        }
+    }
+    val regex = Regex("[A-Za-z0-9_-]{6,32}")
+    return regex.find(ascii)?.value
+}
+
+private suspend fun readCardNoFromTag(tag: Tag, keys: List<ByteArray>): String? = withContext(Dispatchers.IO) {
+    val uidHex = runCatching { MifareClassicTool.bytesToHex(tag.id ?: byteArrayOf()) }.getOrNull()?.takeIf { it.isNotBlank() }
+    val allBlocks = (0..63).toList()
+    val map = runCatching { MifareClassicTool.readBlocks(tag, allBlocks, keys) }.getOrNull()
+    if (map != null) {
+        for (block in allBlocks) {
+            val candidate = map[block]?.let { extractCardNoFromBlockData(it) }
+            if (!candidate.isNullOrBlank()) return@withContext candidate
+        }
+    }
+    return@withContext uidHex
+}
 private suspend fun requestDeduct(cardCode: String, cardNo: String, amount: Int): DeductResult = withContext(Dispatchers.IO) {
     val conn = (URL("https://api.33app.top/deduct.php").openConnection() as HttpURLConnection).apply {
         requestMethod = "POST"
@@ -367,10 +391,16 @@ fun ReadScreen(nfcAdapter: NfcAdapter?) {
                     val baseBlock = targetSector * 4
                     val amountFen = serverAllowAmount * 100
                     val cardCode = loginInfo?.cardCode
+                    val cardNoFromCard = readCardNoFromTag(tag, keys)
 
                     if (cardCode.isNullOrBlank()) {
                         status = "未登录或卡密缺失，禁止刷入"
                         log(LogType.ERROR, "WRITE ABORT => missing card_code")
+                        return@launch
+                    }
+                    if (cardNoFromCard.isNullOrBlank()) {
+                        status = "无法从卡片读取卡号，禁止刷入"
+                        log(LogType.ERROR, "WRITE ABORT => card_no read failed")
                         return@launch
                     }
                     if (serverAllowAmount <= 0) {
@@ -392,13 +422,13 @@ fun ReadScreen(nfcAdapter: NfcAdapter?) {
                     }
 
                     status = "请求服务器扣次中…"
-                    val deduct = requestDeduct(cardCode = cardCode, cardNo = uid, amount = serverAllowAmount)
+                    val deduct = requestDeduct(cardCode = cardCode, cardNo = cardNoFromCard, amount = serverAllowAmount)
                     if (!deduct.success || deduct.rechargeId.isNullOrBlank()) {
                         status = "扣次失败：${deduct.msg}"
                         log(LogType.ERROR, "DEDUCT FAIL => ${deduct.msg}")
                         return@launch
                     }
-                    log(LogType.OK, "DEDUCT OK => recharge_id=${deduct.rechargeId} remain=${deduct.remainTimes ?: "?"}")
+                    log(LogType.OK, "DEDUCT OK => recharge_id=${deduct.rechargeId} card_no=$cardNoFromCard remain=${deduct.remainTimes ?: "?"}")
 
                     status = "WRITING… uid=$uid"
                     val payload = ValuePayload.build(amountFen, selectedK)
