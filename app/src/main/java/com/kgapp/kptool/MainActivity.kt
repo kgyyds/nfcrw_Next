@@ -4,7 +4,6 @@ import android.content.Context
 import android.content.Intent
 import android.nfc.NfcAdapter
 import android.os.Bundle
-import android.widget.Toast
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -29,7 +28,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.CreditCard
 import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.Nfc
 import androidx.compose.material.icons.filled.Person
@@ -39,8 +38,10 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.Typography
@@ -50,6 +51,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -68,40 +70,42 @@ import androidx.lifecycle.LifecycleEventObserver
 import com.kgapp.kptool.ui.AboutActivity
 import com.kgapp.kptool.ui.ReadActivity
 import com.kgapp.kptool.ui.SettingsActivity
-import com.kgapp.kptool.ui.WriteActivity
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
+import java.io.OutputStreamWriter
+import java.net.HttpURLConnection
+import java.net.URL
+import java.net.URLEncoder
 
 private enum class NfcState { NOT_SUPPORTED, DISABLED, ENABLED }
+
+data class LoginInfo(
+    val cardCode: String,
+    val cardNo: String?,
+    val remainTimes: Int,
+    val allowAmount: Int
+)
+
+data class LoginResult(
+    val success: Boolean,
+    val msg: String,
+    val data: LoginInfo? = null
+)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // ✅ UI 不和状态栏合并（保留系统状态栏区域）
         WindowCompat.setDecorFitsSystemWindows(window, true)
-
-        /*
-        //hide 状态栏
-        ViewCompat.setOnApplyWindowInsetsListener(window.decorView) { v, insets ->
-            val controller = ViewCompat.getWindowInsetsController(v)
-            controller?.hide(WindowInsetsCompat.Type.statusBars())
-            insets
-        }
-        */
-
-        // ✅ 状态栏暗色 + 浅色图标
         window.statusBarColor = android.graphics.Color.parseColor("#050607")
         WindowInsetsControllerCompat(window, window.decorView).isAppearanceLightStatusBars = false
 
         setContent {
             HackerTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-
-                    Toast.makeText(
-                        this,
-                        "MainActivity 初始化完成",
-                        Toast.LENGTH_LONG
-                    ).show()
-                    MainScreen()
+                    RootScreen()
                 }
             }
         }
@@ -109,7 +113,122 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun MainScreen() {
+private fun RootScreen() {
+    var loginInfo by remember { mutableStateOf<LoginInfo?>(null) }
+
+    if (loginInfo == null) {
+        LoginScreen(onSuccess = { loginInfo = it })
+    } else {
+        MainMenuScreen(loginInfo = loginInfo!!)
+    }
+}
+
+@Composable
+private fun LoginScreen(onSuccess: (LoginInfo) -> Unit) {
+    var cardCode by remember { mutableStateOf("") }
+    var loginError by remember { mutableStateOf<String?>(null) }
+    var isLoading by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .navigationBarsPadding()
+            .statusBarsPadding()
+            .imePadding()
+            .padding(horizontal = 16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Card(
+            colors = CardDefaults.cardColors(containerColor = HackerPanel),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = "LOGIN//KPTOOL",
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    text = "输入卡密后登录",
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                OutlinedTextField(
+                    value = cardCode,
+                    onValueChange = {
+                        cardCode = it
+                        loginError = null
+                    },
+                    singleLine = true,
+                    label = {
+                        Text("CARD_CODE", fontFamily = FontFamily.Monospace)
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                if (!loginError.isNullOrEmpty()) {
+                    Text(
+                        text = loginError!!,
+                        color = MaterialTheme.colorScheme.error,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 12.sp
+                    )
+                }
+
+                Button(
+                    onClick = {
+                        if (cardCode.isBlank()) {
+                            loginError = "卡密不能为空"
+                            return@Button
+                        }
+                        isLoading = true
+                        scope.launch {
+                            val result = loginWithCardCode(cardCode.trim())
+                            isLoading = false
+                            if (result.success && result.data != null) {
+                                onSuccess(result.data)
+                            } else {
+                                loginError = result.msg
+                            }
+                        }
+                    },
+                    enabled = !isLoading,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                ) {
+                    if (isLoading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            color = Color.Black,
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        Text(
+                            text = "登录",
+                            color = Color.Black,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MainMenuScreen(loginInfo: LoginInfo) {
     val context = LocalContext.current
     val listState = rememberLazyListState()
 
@@ -140,6 +259,7 @@ fun MainScreen() {
             )
         }
 
+        item { LoginInfoCard(loginInfo = loginInfo) }
         item { NFCStatusCardHacker() }
 
         item {
@@ -151,7 +271,6 @@ fun MainScreen() {
                 context.startActivity(Intent(context, ReadActivity::class.java))
             }
         }
-
 
         item {
             MenuCardHacker(
@@ -172,14 +291,63 @@ fun MainScreen() {
                 context.startActivity(Intent(context, AboutActivity::class.java))
             }
         }
-        //test toast
-        item {
-            ToastTestCard()
+    }
+}
+
+@Composable
+private fun LoginInfoCard(loginInfo: LoginInfo) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = HackerPanel),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                Box(Modifier.padding(10.dp), contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.Default.CreditCard,
+                        contentDescription = "card info",
+                        modifier = Modifier.size(22.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+
+            Spacer(Modifier.width(12.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "CARD//INFO",
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "卡密: ${loginInfo.cardCode}",
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = "绑定卡号: ${loginInfo.cardNo ?: "未绑定"}",
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = "剩余次数: ${loginInfo.remainTimes} | 单次金额: ${loginInfo.allowAmount}",
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
-
-
-
-        item { Spacer(Modifier.height(6.dp)) }
     }
 }
 
@@ -253,7 +421,6 @@ private fun NFCStatusCardHacker(modifier: Modifier = Modifier) {
 
     var nfcState by remember { mutableStateOf(getNfcState(context)) }
 
-    // ✅ 自动刷新：从设置返回 / App 回到前台时更新
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) nfcState = getNfcState(context)
@@ -320,6 +487,51 @@ private fun NFCStatusCardHacker(modifier: Modifier = Modifier) {
     }
 }
 
+private suspend fun loginWithCardCode(cardCode: String): LoginResult = withContext(Dispatchers.IO) {
+    val connection = (URL("https://api.33app.top/login.php").openConnection() as HttpURLConnection).apply {
+        requestMethod = "POST"
+        connectTimeout = 10_000
+        readTimeout = 10_000
+        doOutput = true
+        setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+    }
+
+    return@withContext runCatching {
+        val body = "card_code=${URLEncoder.encode(cardCode, "UTF-8")}"
+        OutputStreamWriter(connection.outputStream).use { it.write(body) }
+
+        val responseText = (if (connection.responseCode in 200..299) {
+            connection.inputStream
+        } else {
+            connection.errorStream ?: connection.inputStream
+        }).bufferedReader().use { it.readText() }
+
+        val json = JSONObject(responseText)
+        val code = json.optInt("code", -1)
+        val msg = json.optString("msg", "未知错误")
+
+        if (code == 0) {
+            val data = json.getJSONObject("data")
+            LoginResult(
+                success = true,
+                msg = msg,
+                data = LoginInfo(
+                    cardCode = data.optString("card_code", cardCode),
+                    cardNo = if (data.isNull("card_no")) null else data.optString("card_no"),
+                    remainTimes = data.optInt("remain_times", 0),
+                    allowAmount = data.optInt("allow_amount", 0)
+                )
+            )
+        } else {
+            LoginResult(success = false, msg = msg)
+        }
+    }.getOrElse {
+        LoginResult(success = false, msg = "网络异常：${it.message ?: "未知错误"}")
+    }.also {
+        connection.disconnect()
+    }
+}
+
 private fun getNfcState(context: Context): NfcState {
     val adapter = NfcAdapter.getDefaultAdapter(context) ?: return NfcState.NOT_SUPPORTED
     return if (adapter.isEnabled) NfcState.ENABLED else NfcState.DISABLED
@@ -334,10 +546,8 @@ private fun openNfcSettings(context: Context) {
     }
 }
 
-/** 小工具：四元组 */
 private data class Quad<A, B, C, D>(val a: A, val b: B, val c: C, val d: D)
 
-/** ====== 固定暗色主题：不跟随系统（和你其他页一致） ====== */
 private val HackerBg = Color(0xFF050607)
 private val HackerPanel = Color(0xFF0B0F10)
 private val HackerSurface = Color(0xFF0F1416)
@@ -365,56 +575,4 @@ private fun HackerTheme(content: @Composable () -> Unit) {
         typography = Typography(),
         content = content
     )
-}
-
-
-
-@Composable
-fun ToastTestCard() {
-    val context = LocalContext.current
-    val activity = context as ComponentActivity   // ⭐关键点
-
-    Card(
-        colors = CardDefaults.cardColors(containerColor = HackerPanel),
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable {
-                Toast.makeText(
-                    activity,
-                    "TEST: Toast",
-                    Toast.LENGTH_SHORT
-                ).show()
-            }
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                imageVector = Icons.Default.Warning,
-                contentDescription = "toast",
-                tint = HackerGreen,
-                modifier = Modifier.size(22.dp)
-            )
-
-            Spacer(Modifier.width(12.dp))
-
-            Column {
-                Text(
-                    text = "TEST//TOAST",
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Text(
-                    text = "点击弹出 Toast",
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-    }
 }
