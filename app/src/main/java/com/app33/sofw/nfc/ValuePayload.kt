@@ -1,4 +1,4 @@
-package com.kgapp.kptool.nfc
+package com.app33.sofw.nfc
 
 object ValuePayload {
     fun build(value: Int, k: Int): ByteArray {

@@ -1,4 +1,4 @@
-package com.kgapp.kptool
+package com.app33.sofw
 
 data class LoginInfo(
     val cardCode: String,

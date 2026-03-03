@@ -1,4 +1,4 @@
-package com.kgapp.kptool
+package com.app33.sofw
 
 import android.content.Context
 import android.content.Intent
@@ -67,9 +67,9 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
-import com.kgapp.kptool.ui.AboutActivity
-import com.kgapp.kptool.ui.ReadActivity
-import com.kgapp.kptool.ui.SettingsActivity
+import com.app33.sofw.ui.AboutActivity
+import com.app33.sofw.ui.ReadActivity
+import com.app33.sofw.ui.SettingsActivity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
