@@ -40,6 +40,11 @@ import com.kgapp.kptool.nfc.ValuePayload
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
+import java.io.OutputStreamWriter
+import java.net.HttpURLConnection
+import java.net.URL
+import java.net.URLEncoder
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -130,19 +135,85 @@ private fun parseAmount(blockIndex: Int, data16: ByteArray): AmountInfo {
     )
 }
 
-private fun pickAmount(b60: ByteArray?, b61: ByteArray?): Pair<AmountInfo?, String?> {
-    val block60 = b60?.takeIf { it.size == 16 }
-    val block61 = b61?.takeIf { it.size == 16 }
-    val mismatchWarn = if (block60 != null && block61 != null && !block60.contentEquals(block61)) {
-        "BLOCK MISMATCH => B60 != B61"
+private fun pickAmount(baseBlock: Int, b0: ByteArray?, b1: ByteArray?): Pair<AmountInfo?, String?> {
+    val block0 = b0?.takeIf { it.size == 16 }
+    val block1 = b1?.takeIf { it.size == 16 }
+    val mismatchWarn = if (block0 != null && block1 != null && !block0.contentEquals(block1)) {
+        "BLOCK MISMATCH => B$baseBlock != B${baseBlock + 1}"
     } else {
         null
     }
     return when {
-        block60 != null -> parseAmount(60, block60) to mismatchWarn
-        block61 != null -> parseAmount(61, block61) to mismatchWarn
+        block0 != null -> parseAmount(baseBlock, block0) to mismatchWarn
+        block1 != null -> parseAmount(baseBlock + 1, block1) to mismatchWarn
         else -> null to mismatchWarn
     }
+}
+
+private data class DeductResult(
+    val success: Boolean,
+    val msg: String,
+    val rechargeId: String? = null,
+    val remainTimes: Int? = null,
+)
+
+private data class ConfirmResult(
+    val success: Boolean,
+    val msg: String,
+)
+
+private suspend fun requestDeduct(cardCode: String, cardNo: String, amount: Int): DeductResult = withContext(Dispatchers.IO) {
+    val conn = (URL("https://api.33app.top/deduct.php").openConnection() as HttpURLConnection).apply {
+        requestMethod = "POST"
+        connectTimeout = 10_000
+        readTimeout = 10_000
+        doOutput = true
+        setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+    }
+    return@withContext runCatching {
+        val body = "card_code=${URLEncoder.encode(cardCode, "UTF-8")}" +
+            "&card_no=${URLEncoder.encode(cardNo, "UTF-8")}" +
+            "&amount=${URLEncoder.encode(amount.toString(), "UTF-8")}"
+        OutputStreamWriter(conn.outputStream).use { it.write(body) }
+        val response = (if (conn.responseCode in 200..299) conn.inputStream else conn.errorStream ?: conn.inputStream)
+            .bufferedReader().use { it.readText() }
+        val json = JSONObject(response)
+        val code = json.optInt("code", -1)
+        val msg = json.optString("msg", "未知错误")
+        if (code == 0) {
+            val data = json.optJSONObject("data")
+            DeductResult(
+                success = true,
+                msg = msg,
+                rechargeId = data?.optString("recharge_id"),
+                remainTimes = data?.optInt("remain_times")
+            )
+        } else {
+            DeductResult(false, msg)
+        }
+    }.getOrElse { DeductResult(false, "扣次请求失败：${it.message ?: "未知错误"}") }
+        .also { conn.disconnect() }
+}
+
+private suspend fun requestConfirm(rechargeId: String): ConfirmResult = withContext(Dispatchers.IO) {
+    val conn = (URL("https://api.33app.top/confirm.php").openConnection() as HttpURLConnection).apply {
+        requestMethod = "POST"
+        connectTimeout = 10_000
+        readTimeout = 10_000
+        doOutput = true
+        setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+    }
+    return@withContext runCatching {
+        val body = "recharge_id=${URLEncoder.encode(rechargeId, "UTF-8")}&status=done"
+        OutputStreamWriter(conn.outputStream).use { it.write(body) }
+        val response = (if (conn.responseCode in 200..299) conn.inputStream else conn.errorStream ?: conn.inputStream)
+            .bufferedReader().use { it.readText() }
+        val json = JSONObject(response)
+        val code = json.optInt("code", -1)
+        val msg = json.optString("msg", "未知错误")
+        ConfirmResult(code == 0, msg)
+    }.getOrElse { ConfirmResult(false, "确认请求失败：${it.message ?: "未知错误"}") }
+        .also { conn.disconnect() }
 }
 
 @Composable
@@ -292,19 +363,82 @@ fun ReadScreen(nfcAdapter: NfcAdapter?) {
             try {
                 val uid = runCatching { bytesToHex(tag.id ?: byteArrayOf()) }.getOrDefault("UNKNOWN")
                 if (action == "WRITE") {
-                    status = "WRITING… uid=$uid"
                     val targetSector = selectedSectors().firstOrNull() ?: fixedSector ?: 15
                     val baseBlock = targetSector * 4
-                    val payload = ValuePayload.build(serverAllowAmount * 100, selectedK)
+                    val amountFen = serverAllowAmount * 100
+                    val cardCode = loginInfo?.cardCode
+
+                    if (cardCode.isNullOrBlank()) {
+                        status = "未登录或卡密缺失，禁止刷入"
+                        log(LogType.ERROR, "WRITE ABORT => missing card_code")
+                        return@launch
+                    }
+                    if (serverAllowAmount <= 0) {
+                        status = "allow_amount 异常，禁止刷入"
+                        log(LogType.ERROR, "WRITE ABORT => invalid allow_amount=$serverAllowAmount")
+                        return@launch
+                    }
+
+                    status = "预读取卡片信息… uid=$uid"
+                    val preReadOk = runCatching {
+                        withContext(Dispatchers.IO) {
+                            MifareClassicTool.readBlocks(tag, listOf(baseBlock, baseBlock + 1), keys)
+                        }
+                    }.isSuccess
+                    if (!preReadOk) {
+                        status = "读取卡片失败，无法扣次"
+                        log(LogType.ERROR, "WRITE ABORT => pre-read failed")
+                        return@launch
+                    }
+
+                    status = "请求服务器扣次中…"
+                    val deduct = requestDeduct(cardCode = cardCode, cardNo = uid, amount = serverAllowAmount)
+                    if (!deduct.success || deduct.rechargeId.isNullOrBlank()) {
+                        status = "扣次失败：${deduct.msg}"
+                        log(LogType.ERROR, "DEDUCT FAIL => ${deduct.msg}")
+                        return@launch
+                    }
+                    log(LogType.OK, "DEDUCT OK => recharge_id=${deduct.rechargeId} remain=${deduct.remainTimes ?: "?"}")
+
+                    status = "WRITING… uid=$uid"
+                    val payload = ValuePayload.build(amountFen, selectedK)
                     val writeMap = linkedMapOf(baseBlock to payload, (baseBlock + 1) to payload)
                     val writeResult = withContext(Dispatchers.IO) {
                         MifareClassicTool.writeBlocks(tag, writeMap, keys, false)
                     }
                     val allOk = writeResult.allSuccess
-                    amountInfo = parseAmount(60, payload)
+                    amountInfo = parseAmount(baseBlock, payload)
                     amountWarn = null
-                    status = if (allOk) "WRITE DONE ✅ amount=$serverAllowAmount" else "WRITE DONE ⚠️ 部分失败"
-                    log(if (allOk) LogType.OK else LogType.WARN, "WRITE amount=$serverAllowAmount k=0x${"%02X".format(selectedK)} uid=$uid allOk=$allOk")
+                    if (!allOk) {
+                        status = "WRITE FAIL ⚠️ 已扣次未完全写入"
+                        log(LogType.ERROR, "WRITE FAIL => recharge_id=${deduct.rechargeId}")
+                        return@launch
+                    }
+
+                    status = "校验写入结果中…"
+                    val verifyMap = runCatching {
+                        withContext(Dispatchers.IO) {
+                            MifareClassicTool.readBlocks(tag, listOf(baseBlock, baseBlock + 1), keys)
+                        }
+                    }.getOrNull()
+                    val verifyAmount = pickAmount(baseBlock, verifyMap?.get(baseBlock), verifyMap?.get(baseBlock + 1)).first
+                    val verifyOk = verifyAmount != null && verifyAmount.rawValue == amountFen
+                    if (!verifyOk) {
+                        status = "写入校验失败，未发送确认"
+                        log(LogType.ERROR, "VERIFY FAIL => expect=$amountFen actual=${verifyAmount?.rawValue}")
+                        return@launch
+                    }
+
+                    val confirm = requestConfirm(deduct.rechargeId)
+                    status = if (confirm.success) {
+                        "WRITE DONE ✅ amount=$serverAllowAmount"
+                    } else {
+                        "WRITE DONE ⚠️ 确认失败：${confirm.msg}"
+                    }
+                    log(
+                        if (confirm.success) LogType.OK else LogType.WARN,
+                        "WRITE+CONFIRM uid=$uid amount=$serverAllowAmount recharge_id=${deduct.rechargeId} msg=${confirm.msg}"
+                    )
                     return@launch
                 }
                 status = "READING… uid=$uid"
@@ -370,7 +504,7 @@ fun ReadScreen(nfcAdapter: NfcAdapter?) {
                 var block60: ByteArray? = existing60
                 var block61: ByteArray? = existing61
                 if (block60 == null && block61 == null) {
-                    log(LogType.INFO, "AMOUNT EXTRA READ => blocks=60,61")
+                    log(LogType.INFO, "AMOUNT EXTRA READ => blocks=$baseBlock,${baseBlock + 1}")
                     val extraMap = try {
                         withContext(Dispatchers.IO) {
                             MifareClassicTool.readBlocks(tag, listOf(baseBlock, baseBlock + 1), keys)
@@ -380,11 +514,11 @@ fun ReadScreen(nfcAdapter: NfcAdapter?) {
                         log(LogType.WARN, "AMOUNT EXTRA READ FAIL => $reason")
                         null
                     }
-                    block60 = extraMap?.get(60)
-                    block61 = extraMap?.get(61)
+                    block60 = extraMap?.get(baseBlock)
+                    block61 = extraMap?.get(baseBlock + 1)
                 }
 
-                val (pickedAmount, warn) = pickAmount(block60, block61)
+                val (pickedAmount, warn) = pickAmount(baseBlock, block60, block61)
                 amountInfo = pickedAmount
                 amountWarn = warn
                 if (warn != null) {
