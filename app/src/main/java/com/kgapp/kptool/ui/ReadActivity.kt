@@ -33,12 +33,18 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import com.kgapp.kptool.AppSession
 import com.kgapp.kptool.AppSettings
 import com.kgapp.kptool.nfc.MifareClassicTool
 import com.kgapp.kptool.nfc.ValuePayload
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
+import java.io.OutputStreamWriter
+import java.net.HttpURLConnection
+import java.net.URL
+import java.net.URLEncoder
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -129,19 +135,85 @@ private fun parseAmount(blockIndex: Int, data16: ByteArray): AmountInfo {
     )
 }
 
-private fun pickAmount(b60: ByteArray?, b61: ByteArray?): Pair<AmountInfo?, String?> {
-    val block60 = b60?.takeIf { it.size == 16 }
-    val block61 = b61?.takeIf { it.size == 16 }
-    val mismatchWarn = if (block60 != null && block61 != null && !block60.contentEquals(block61)) {
-        "BLOCK MISMATCH => B60 != B61"
+private fun pickAmount(baseBlock: Int, b0: ByteArray?, b1: ByteArray?): Pair<AmountInfo?, String?> {
+    val block0 = b0?.takeIf { it.size == 16 }
+    val block1 = b1?.takeIf { it.size == 16 }
+    val mismatchWarn = if (block0 != null && block1 != null && !block0.contentEquals(block1)) {
+        "BLOCK MISMATCH => B$baseBlock != B${baseBlock + 1}"
     } else {
         null
     }
     return when {
-        block60 != null -> parseAmount(60, block60) to mismatchWarn
-        block61 != null -> parseAmount(61, block61) to mismatchWarn
+        block0 != null -> parseAmount(baseBlock, block0) to mismatchWarn
+        block1 != null -> parseAmount(baseBlock + 1, block1) to mismatchWarn
         else -> null to mismatchWarn
     }
+}
+
+private data class DeductResult(
+    val success: Boolean,
+    val msg: String,
+    val rechargeId: String? = null,
+    val remainTimes: Int? = null,
+)
+
+private data class ConfirmResult(
+    val success: Boolean,
+    val msg: String,
+)
+
+private suspend fun requestDeduct(cardCode: String, cardNo: String, amount: Int): DeductResult = withContext(Dispatchers.IO) {
+    val conn = (URL("https://api.33app.top/deduct.php").openConnection() as HttpURLConnection).apply {
+        requestMethod = "POST"
+        connectTimeout = 10_000
+        readTimeout = 10_000
+        doOutput = true
+        setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+    }
+    return@withContext runCatching {
+        val body = "card_code=${URLEncoder.encode(cardCode, "UTF-8")}" +
+            "&card_no=${URLEncoder.encode(cardNo, "UTF-8")}" +
+            "&amount=${URLEncoder.encode(amount.toString(), "UTF-8")}"
+        OutputStreamWriter(conn.outputStream).use { it.write(body) }
+        val response = (if (conn.responseCode in 200..299) conn.inputStream else conn.errorStream ?: conn.inputStream)
+            .bufferedReader().use { it.readText() }
+        val json = JSONObject(response)
+        val code = json.optInt("code", -1)
+        val msg = json.optString("msg", "未知错误")
+        if (code == 0) {
+            val data = json.optJSONObject("data")
+            DeductResult(
+                success = true,
+                msg = msg,
+                rechargeId = data?.optString("recharge_id"),
+                remainTimes = data?.optInt("remain_times")
+            )
+        } else {
+            DeductResult(false, msg)
+        }
+    }.getOrElse { DeductResult(false, "扣次请求失败：${it.message ?: "未知错误"}") }
+        .also { conn.disconnect() }
+}
+
+private suspend fun requestConfirm(rechargeId: String): ConfirmResult = withContext(Dispatchers.IO) {
+    val conn = (URL("https://api.33app.top/confirm.php").openConnection() as HttpURLConnection).apply {
+        requestMethod = "POST"
+        connectTimeout = 10_000
+        readTimeout = 10_000
+        doOutput = true
+        setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+    }
+    return@withContext runCatching {
+        val body = "recharge_id=${URLEncoder.encode(rechargeId, "UTF-8")}&status=done"
+        OutputStreamWriter(conn.outputStream).use { it.write(body) }
+        val response = (if (conn.responseCode in 200..299) conn.inputStream else conn.errorStream ?: conn.inputStream)
+            .bufferedReader().use { it.readText() }
+        val json = JSONObject(response)
+        val code = json.optInt("code", -1)
+        val msg = json.optString("msg", "未知错误")
+        ConfirmResult(code == 0, msg)
+    }.getOrElse { ConfirmResult(false, "确认请求失败：${it.message ?: "未知错误"}") }
+        .also { conn.disconnect() }
 }
 
 @Composable
@@ -151,11 +223,17 @@ fun ReadScreen(nfcAdapter: NfcAdapter?) {
     val showDetailedLogs = remember { AppSettings.isDetailedLogsEnabled(context) }
     val scope = rememberCoroutineScope()
 
-    val maxSector = 15 // Mifare Classic 1K：0..15
+    val loginInfo = remember { AppSession.getLoginInfo() }
+    val serverAllowAmount = (loginInfo?.allowAmount ?: 0).coerceAtLeast(0)
 
-    // keys：从设置里读
+    val maxSector = 15 // Mifare Classic 1K：0..15
+    val runtimeInfo = remember { AppSession.getRuntimeInfo() }
+    val isSectorSelectable = runtimeInfo?.sector == 100
+    val fixedSector = runtimeInfo?.sector?.takeIf { it in 0..maxSector }
+
+    // keys：登录后从云端获取
     var keys by remember {
-        mutableStateOf(AppSettings.parseKeysFromText(AppSettings.getKeysText(context)))
+        mutableStateOf(runtimeInfo?.keys ?: emptyList())
     }
 
     // ✅ 用 SnapshotStateList 避免 copyOf() 卡顿
@@ -182,9 +260,7 @@ fun ReadScreen(nfcAdapter: NfcAdapter?) {
     // 防并发 + 手动触发
     var readingNow by remember { mutableStateOf(false) }
     var pendingAction by remember { mutableStateOf("NONE") }
-    val fixedAmounts = listOf(20, 50, 100, 200)
     val kOptions = listOf(0x39, 0x01, 0x59, 0xC9, 0x91)
-    var selectedWriteAmount by rememberSaveable { mutableStateOf(20) }
     var selectedK by rememberSaveable { mutableStateOf(kOptions.first()) }
 
     fun nowStr(): String =
@@ -199,13 +275,14 @@ fun ReadScreen(nfcAdapter: NfcAdapter?) {
     }
 
     fun reloadKeys() {
-        keys = AppSettings.parseKeysFromText(AppSettings.getKeysText(context))
-        status = "已加载 keys：${keys.size} 个"
-        log(LogType.INFO, "KEYS RELOAD => ${keys.size}")
+        keys = AppSession.getRuntimeInfo()?.keys ?: emptyList()
+        status = "已同步云端 keys：${keys.size} 个"
+        log(LogType.INFO, "CLOUD KEYS SYNC => ${keys.size}")
     }
 
     fun selectedSectors(): List<Int> =
-        checkedSectors.mapIndexedNotNull { idx, v -> if (v) idx else null }
+        if (isSectorSelectable) checkedSectors.mapIndexedNotNull { idx, v -> if (v) idx else null }
+        else fixedSector?.let { listOf(it) } ?: emptyList()
 
     fun sectorSummary(): String {
         val s = selectedSectors()
@@ -272,7 +349,7 @@ fun ReadScreen(nfcAdapter: NfcAdapter?) {
             pendingAction = "NONE"
             val sectors = selectedSectors()
             if (keys.isEmpty()) {
-                status = "没有可用 keys 请先在设置添加"
+                status = "没有可用云端 keys，请先登录"
                 log(LogType.ERROR, "NO KEYS => go Settings")
                 return@launch
             }
@@ -286,17 +363,82 @@ fun ReadScreen(nfcAdapter: NfcAdapter?) {
             try {
                 val uid = runCatching { bytesToHex(tag.id ?: byteArrayOf()) }.getOrDefault("UNKNOWN")
                 if (action == "WRITE") {
+                    val targetSector = selectedSectors().firstOrNull() ?: fixedSector ?: 15
+                    val baseBlock = targetSector * 4
+                    val amountFen = serverAllowAmount * 100
+                    val cardCode = loginInfo?.cardCode
+
+                    if (cardCode.isNullOrBlank()) {
+                        status = "未登录或卡密缺失，禁止刷入"
+                        log(LogType.ERROR, "WRITE ABORT => missing card_code")
+                        return@launch
+                    }
+                    if (serverAllowAmount <= 0) {
+                        status = "allow_amount 异常，禁止刷入"
+                        log(LogType.ERROR, "WRITE ABORT => invalid allow_amount=$serverAllowAmount")
+                        return@launch
+                    }
+
+                    status = "预读取卡片信息… uid=$uid"
+                    val preReadOk = runCatching {
+                        withContext(Dispatchers.IO) {
+                            MifareClassicTool.readBlocks(tag, listOf(baseBlock, baseBlock + 1), keys)
+                        }
+                    }.isSuccess
+                    if (!preReadOk) {
+                        status = "读取卡片失败，无法扣次"
+                        log(LogType.ERROR, "WRITE ABORT => pre-read failed")
+                        return@launch
+                    }
+
+                    status = "请求服务器扣次中…"
+                    val deduct = requestDeduct(cardCode = cardCode, cardNo = uid, amount = serverAllowAmount)
+                    if (!deduct.success || deduct.rechargeId.isNullOrBlank()) {
+                        status = "扣次失败：${deduct.msg}"
+                        log(LogType.ERROR, "DEDUCT FAIL => ${deduct.msg}")
+                        return@launch
+                    }
+                    log(LogType.OK, "DEDUCT OK => recharge_id=${deduct.rechargeId} remain=${deduct.remainTimes ?: "?"}")
+
                     status = "WRITING… uid=$uid"
-                    val payload = ValuePayload.build(selectedWriteAmount * 100, selectedK)
-                    val writeMap = linkedMapOf(60 to payload, 61 to payload)
+                    val payload = ValuePayload.build(amountFen, selectedK)
+                    val writeMap = linkedMapOf(baseBlock to payload, (baseBlock + 1) to payload)
                     val writeResult = withContext(Dispatchers.IO) {
                         MifareClassicTool.writeBlocks(tag, writeMap, keys, false)
                     }
                     val allOk = writeResult.allSuccess
-                    amountInfo = parseAmount(60, payload)
+                    amountInfo = parseAmount(baseBlock, payload)
                     amountWarn = null
-                    status = if (allOk) "WRITE DONE ✅ amount=$selectedWriteAmount" else "WRITE DONE ⚠️ 部分失败"
-                    log(if (allOk) LogType.OK else LogType.WARN, "WRITE amount=$selectedWriteAmount k=0x${"%02X".format(selectedK)} uid=$uid allOk=$allOk")
+                    if (!allOk) {
+                        status = "WRITE FAIL ⚠️ 已扣次未完全写入"
+                        log(LogType.ERROR, "WRITE FAIL => recharge_id=${deduct.rechargeId}")
+                        return@launch
+                    }
+
+                    status = "校验写入结果中…"
+                    val verifyMap = runCatching {
+                        withContext(Dispatchers.IO) {
+                            MifareClassicTool.readBlocks(tag, listOf(baseBlock, baseBlock + 1), keys)
+                        }
+                    }.getOrNull()
+                    val verifyAmount = pickAmount(baseBlock, verifyMap?.get(baseBlock), verifyMap?.get(baseBlock + 1)).first
+                    val verifyOk = verifyAmount != null && verifyAmount.rawValue == amountFen
+                    if (!verifyOk) {
+                        status = "写入校验失败，未发送确认"
+                        log(LogType.ERROR, "VERIFY FAIL => expect=$amountFen actual=${verifyAmount?.rawValue}")
+                        return@launch
+                    }
+
+                    val confirm = requestConfirm(deduct.rechargeId)
+                    status = if (confirm.success) {
+                        "WRITE DONE ✅ amount=$serverAllowAmount"
+                    } else {
+                        "WRITE DONE ⚠️ 确认失败：${confirm.msg}"
+                    }
+                    log(
+                        if (confirm.success) LogType.OK else LogType.WARN,
+                        "WRITE+CONFIRM uid=$uid amount=$serverAllowAmount recharge_id=${deduct.rechargeId} msg=${confirm.msg}"
+                    )
                     return@launch
                 }
                 status = "READING… uid=$uid"
@@ -355,26 +497,28 @@ fun ReadScreen(nfcAdapter: NfcAdapter?) {
 
                 output = buildDumpText(uid, sectors, allMap)
 
-                val existing60 = allMap[60]
-                val existing61 = allMap[61]
+                val targetSector = selectedSectors().firstOrNull() ?: fixedSector ?: 15
+                val baseBlock = targetSector * 4
+                val existing60 = allMap[baseBlock]
+                val existing61 = allMap[baseBlock + 1]
                 var block60: ByteArray? = existing60
                 var block61: ByteArray? = existing61
                 if (block60 == null && block61 == null) {
-                    log(LogType.INFO, "AMOUNT EXTRA READ => blocks=60,61")
+                    log(LogType.INFO, "AMOUNT EXTRA READ => blocks=$baseBlock,${baseBlock + 1}")
                     val extraMap = try {
                         withContext(Dispatchers.IO) {
-                            MifareClassicTool.readBlocks(tag, listOf(60, 61), keys)
+                            MifareClassicTool.readBlocks(tag, listOf(baseBlock, baseBlock + 1), keys)
                         }
                     } catch (e: Exception) {
                         val reason = e.message ?: "未知错误"
                         log(LogType.WARN, "AMOUNT EXTRA READ FAIL => $reason")
                         null
                     }
-                    block60 = extraMap?.get(60)
-                    block61 = extraMap?.get(61)
+                    block60 = extraMap?.get(baseBlock)
+                    block61 = extraMap?.get(baseBlock + 1)
                 }
 
-                val (pickedAmount, warn) = pickAmount(block60, block61)
+                val (pickedAmount, warn) = pickAmount(baseBlock, block60, block61)
                 amountInfo = pickedAmount
                 amountWarn = warn
                 if (warn != null) {
@@ -485,7 +629,7 @@ fun ReadScreen(nfcAdapter: NfcAdapter?) {
             Button(
                 onClick = {
                     if (keys.isEmpty()) {
-                        status = "没有可用 keys 请先在设置添加"
+                        status = "没有可用云端 keys，请先登录"
                         log(LogType.ERROR, "NO KEYS => go Settings")
                     } else if (selectedSectors().isEmpty()) {
                         status = "未勾选任何扇区"
@@ -512,15 +656,12 @@ fun ReadScreen(nfcAdapter: NfcAdapter?) {
                     fontFamily = FontFamily.Monospace
                 )
                 Spacer(Modifier.height(10.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                    fixedAmounts.forEach { amount ->
-                        FilterChip(
-                            selected = selectedWriteAmount == amount,
-                            onClick = { selectedWriteAmount = amount },
-                            label = { Text("¥$amount", fontFamily = FontFamily.Monospace) }
-                        )
-                    }
-                }
+                Text(
+                    text = "刷入金额由服务端下发（allow_amount）：¥$serverAllowAmount",
+                    fontSize = 12.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
                 Spacer(Modifier.height(10.dp))
                 Text(
                     text = "K值选择：0x%02X".format(selectedK),
@@ -542,8 +683,8 @@ fun ReadScreen(nfcAdapter: NfcAdapter?) {
                 Button(
                     onClick = {
                         pendingAction = "WRITE"
-                        status = "请贴卡执行一次写入 ¥$selectedWriteAmount / K=0x%02X ✍️".format(selectedK)
-                        log(LogType.INFO, "ARMED WRITE => amount=$selectedWriteAmount k=0x${"%02X".format(selectedK)}")
+                        status = "请贴卡执行一次写入 ¥$serverAllowAmount / K=0x%02X ✍️".format(selectedK)
+                        log(LogType.INFO, "ARMED WRITE => amount=$serverAllowAmount k=0x${"%02X".format(selectedK)}")
                     },
                     enabled = !readingNow,
                     modifier = Modifier.fillMaxWidth()
@@ -566,15 +707,15 @@ fun ReadScreen(nfcAdapter: NfcAdapter?) {
             )
             Spacer(Modifier.height(6.dp))
             Text(
-                text = "SECTORS=${maxSector + 1} | ${sectorSummary()} | TRAILER=${if (includeTrailer) "ON" else "OFF"} | KEYS=${keys.size}",
+                text = "SECTOR_MODE=${if (isSectorSelectable) "SELECTABLE" else "FIXED"} | ${sectorSummary()} | TRAILER=${if (includeTrailer) "ON" else "OFF"} | KEYS=${keys.size}",
                 fontFamily = FontFamily.Monospace,
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
 
-        // 扇区选择卡片（可折叠）
-        item {
+        // 扇区选择卡片（仅 sector=100 时可选）
+        if (isSectorSelectable) item {
             HackerCard {
                 val interaction = remember { MutableInteractionSource() }
                 Row(
@@ -686,6 +827,25 @@ fun ReadScreen(nfcAdapter: NfcAdapter?) {
                         }
                     }
                 }
+            }
+        }
+
+
+        if (!isSectorSelectable) item {
+            HackerCard {
+                Text(
+                    "SECTOR POLICY",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    fontFamily = FontFamily.Monospace
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "当前为固定扇区：S${fixedSector ?: "?"}（由服务端 info.php 下发）",
+                    fontSize = 12.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
 
