@@ -110,7 +110,7 @@ private fun AboutScreen() {
                         fontSize = 14.sp
                     )
                     Text(
-                        text = "Kgyyds",
+                        text = "神秘人",
                         fontFamily = FontFamily.Monospace,
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
